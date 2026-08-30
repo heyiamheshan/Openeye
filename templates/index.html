@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenEye — AI Camera Monitor</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <span class="logo">OpenEye</span>
+      <div class="status-badge" id="statusBadge">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusLabel">Idle</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ── left: camera feed ── -->
+    <section class="panel-camera">
+      <div class="camera-frame">
+        <img id="cameraFeed" src="/video_feed" alt="Live camera feed" />
+        <div class="camera-overlay" id="cameraOverlay">
+          <span>Camera unavailable</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── right: rule + alerts ── -->
+    <aside class="panel-side">
+      <!-- rule input -->
+      <div class="card rule-card">
+        <label class="rule-label" for="ruleInput">Monitoring Rule</label>
+        <textarea
+          id="ruleInput"
+          class="rule-input"
+          rows="3"
+          placeholder="Alert me if someone enters the yellow zone"
+          spellcheck="false"
+        ></textarea>
+        <div class="rule-actions">
+          <button class="btn btn-start" id="startBtn" onclick="startMonitoring()">
+            Start Monitoring
+          </button>
+          <button class="btn btn-stop" id="stopBtn" onclick="stopMonitoring()" disabled>
+            Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- alert feed -->
+      <div class="card alerts-card">
+        <div class="alerts-header">
+          <h2 class="section-title">Alerts</h2>
+          <span class="alert-count" id="alertCount">0</span>
+        </div>
+        <div class="alerts-list" id="alertsList">
+          <div class="empty-state" id="emptyState">
+            <p>No alerts yet.</p>
+            <p class="empty-hint">Alerts will appear here when your rule is triggered.</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>

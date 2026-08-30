@@ -1,4 +1,5 @@
-requests
-Pillow
+flask
 opencv-python
+Pillow
+requests
 python-dotenv

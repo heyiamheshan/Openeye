@@ -2,7 +2,3 @@
 __pycache__/
 *.pyc
 alerts/
-frames/
-camera_test.jpg
-verify_index0.jpg
-verify_index1.jpg
