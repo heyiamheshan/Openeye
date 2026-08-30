@@ -20,15 +20,50 @@
   <main class="layout">
     <!-- ── left: camera feed ── -->
     <section class="panel-camera">
+      <div class="camera-toolbar">
+        <label class="mode-option">
+          <input type="radio" name="drawMode" value="rect" checked />
+          Rectangle
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="drawMode" value="poly" />
+          Polygon
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="drawMode" value="circle" />
+          Circle
+        </label>
+        <button class="btn-sm" id="drawZoneBtn" onclick="toggleDrawMode()">Draw Zone</button>
+        <span class="toolbar-hint" id="drawHint"></span>
+      </div>
+
       <div class="camera-frame">
         <img id="cameraFeed" src="/video_feed" alt="Live camera feed" />
+        <canvas id="zoneCanvas"></canvas>
         <div class="camera-overlay" id="cameraOverlay">
           <span>Camera unavailable</span>
         </div>
       </div>
+
+      <div class="zone-name-prompt" id="zoneNamePrompt">
+        <div class="prompt-inner">
+          <div class="prompt-label">Name this zone</div>
+          <div class="prompt-row">
+            <input
+              type="text"
+              class="zone-name-input"
+              id="zoneNameInput"
+              placeholder="e.g. Yellow Zone"
+              spellcheck="false"
+            />
+            <button class="btn-confirm" onclick="confirmZoneName()">Save</button>
+            <button class="btn-cancel-sm" onclick="hidePendingPrompt()">Cancel</button>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <!-- ── right: rule + alerts ── -->
+    <!-- ── right: rule + zones + alerts ── -->
     <aside class="panel-side">
       <!-- rule input -->
       <div class="card rule-card">
@@ -47,6 +82,17 @@
           <button class="btn btn-stop" id="stopBtn" onclick="stopMonitoring()" disabled>
             Stop
           </button>
+        </div>
+      </div>
+
+      <!-- zones -->
+      <div class="card zones-card">
+        <div class="zones-header">
+          <h2 class="section-title">Zones</h2>
+          <button class="btn-sm" onclick="clearAllZones()">Clear All</button>
+        </div>
+        <div class="zones-list" id="zonesList">
+          <p class="zones-empty" id="zonesEmpty">No zones defined yet.</p>
         </div>
       </div>
 

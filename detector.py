@@ -15,6 +15,24 @@ import urllib3
 from PIL import Image
 
 import config
+import zones_store
+
+
+def point_in_polygon(point: tuple, polygon: list) -> bool:
+    """Ray casting algorithm. point=(x, y), polygon=[[x, y], ...], all normalised 0-1."""
+    x, y = point
+    n = len(polygon)
+    if n < 3:
+        return False
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi):
+            inside = not inside
+        j = i
+    return inside
 
 
 def fetch_frame() -> bytes:
@@ -47,13 +65,22 @@ def resize_and_encode(image_bytes: bytes) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def analyze_frame(b64_image: str, rule: str) -> dict:
+def analyze_frame(b64_image: str, rule: str, zones: dict | None = None) -> dict:
     prompt = (
         f"Rule: {rule}. "
         "Does this frame violate the rule? "
         'Respond ONLY with JSON: {"triggered": true or false, '
-        '"explanation": "one sentence", "confidence": 0.0 to 1.0}'
+        '"explanation": "one sentence", "confidence": 0.0 to 1.0, '
+        '"bbox": [x1,y1,x2,y2] or null (normalised 0-1 coordinates of the '
+        "relevant person/object, or null if none)}"
     )
+    if zones:
+        zone_desc = "; ".join(f"{name}: polygon points {points}" for name, points in zones.items())
+        prompt += (
+            " The following named zones are defined on this frame (normalised 0-1 coordinates): "
+            f"{zone_desc}. If a person or object is detected inside any zone, mention the zone "
+            "name in your explanation and set triggered to true."
+        )
     payload = {
         "model": config.MODEL,
         "messages": [
@@ -91,7 +118,22 @@ def analyze_frame(b64_image: str, rule: str) -> dict:
         )
     resp.raise_for_status()
     raw = resp.json()["choices"][0]["message"]["content"]
-    return parse_response(raw)
+    result = parse_response(raw)
+
+    zone_name = None
+    bbox = result.get("bbox")
+    if zones and bbox and len(bbox) == 4:
+        x1, y1, x2, y2 = bbox
+        center = ((x1 + x2) / 2, (y1 + y2) / 2)
+        for name, points in zones.items():
+            if point_in_polygon(center, points):
+                zone_name = name
+                result["triggered"] = True
+                explanation = result.get("explanation", "").rstrip(".")
+                result["explanation"] = f"{explanation} (inside zone '{name}')."
+                break
+    result["zone"] = zone_name
+    return result
 
 
 def parse_response(raw: str) -> dict:
@@ -128,11 +170,13 @@ class DetectorThread(threading.Thread):
             try:
                 raw_bytes = fetch_frame()
                 b64 = resize_and_encode(raw_bytes)
-                result = analyze_frame(b64, self.rule)
+                zones = zones_store.get_zones()
+                result = analyze_frame(b64, self.rule, zones)
 
                 triggered = result.get("triggered", False)
                 explanation = result.get("explanation", "")
                 confidence = round(float(result.get("confidence", 0.0)), 2)
+                zone_name = result.get("zone")
 
                 if triggered:
                     ts = datetime.now()
@@ -146,6 +190,7 @@ class DetectorThread(threading.Thread):
                         "explanation": explanation,
                         "confidence": confidence,
                         "thumbnail": f"/alerts/{filename}",
+                        "zone": zone_name,
                     }
                     with self._lock:
                         self._alerts.appendleft(alert)

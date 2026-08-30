@@ -6,6 +6,7 @@ import cv2
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 import config
+import zones_store
 from detector import DetectorThread
 
 app = Flask(__name__)
@@ -55,8 +56,21 @@ def video_feed():
     )
 
 
-@app.route("/rule", methods=["POST"])
-def set_rule():
+@app.route("/current_frame")
+def current_frame():
+    cam = _get_camera()
+    with _camera_lock:
+        ok, frame = cam.read()
+    if not ok:
+        return jsonify(error="Failed to capture frame"), 503
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+        return jsonify(error="Failed to encode frame"), 503
+    return Response(buf.tobytes(), mimetype="image/jpeg")
+
+
+@app.route("/start", methods=["POST"])
+def start_monitoring():
     global _detector_thread
     data = request.get_json(silent=True) or {}
     rule = data.get("rule", "").strip()
@@ -81,8 +95,8 @@ def stop():
     return jsonify(ok=True)
 
 
-@app.route("/alerts")
-def alerts():
+@app.route("/alerts/json")
+def alerts_json():
     with _detector_lock:
         thread = _detector_thread
     monitoring = bool(thread and thread.is_alive() and thread.is_active())
@@ -93,6 +107,30 @@ def alerts():
 @app.route("/alerts/<path:filename>")
 def alert_image(filename):
     return send_from_directory(config.ALERTS_DIR, filename)
+
+
+@app.route("/zones")
+def get_zones():
+    return jsonify(zones=zones_store.get_zones())
+
+
+@app.route("/zones", methods=["POST"])
+def create_zone():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    points = data.get("points")
+    if not name or not points or len(points) < 3:
+        return jsonify(error="Zone name and at least 3 points are required"), 400
+    zones_store.set_zone(name, points)
+    return jsonify(ok=True)
+
+
+@app.route("/zones/<path:name>", methods=["DELETE"])
+def remove_zone(name):
+    deleted = zones_store.delete_zone(name)
+    if not deleted:
+        return jsonify(error="Zone not found"), 404
+    return jsonify(ok=True)
 
 
 if __name__ == "__main__":

@@ -129,6 +129,32 @@ html, body {
   display: block;
 }
 
+/* canvas sits exactly on top of the video */
+#zoneCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius);
+  cursor: default;
+  pointer-events: none;
+}
+
+#zoneCanvas.drawing {
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+#zoneCanvas.moving {
+  cursor: default;
+  pointer-events: all;
+}
+
+#zoneCanvas.grabbing {
+  cursor: grabbing !important;
+  pointer-events: all;
+}
+
 .camera-overlay {
   display: none;
   position: absolute;
@@ -139,6 +165,105 @@ html, body {
   color: var(--text-faint);
   font-size: 14px;
 }
+
+/* draw-zone toolbar above the camera */
+.camera-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 4px;
+  font-style: italic;
+}
+
+/* rect / poly mode radio labels */
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mode-option input[type="radio"] {
+  accent-color: var(--amber);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* freeze indicator — shown when camera is paused for drawing */
+.camera-frame.freeze::after {
+  content: '● PAUSED — drawing zone';
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 3px 9px;
+  background: rgba(0,0,0,0.55);
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* ── zone name prompt ─────────────────────────────────────────────────────── */
+.zone-name-prompt {
+  display: none;          /* hidden by default — JS adds .visible */
+  margin-top: 10px;
+  border: 1px solid var(--amber);
+  border-radius: var(--radius);
+  background: var(--amber-light);
+  overflow: hidden;
+  animation: slideDown 0.15s ease;
+}
+
+.zone-name-prompt.visible { display: block; }
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.prompt-inner { padding: 14px 16px; }
+
+.prompt-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--amber-dark);
+  margin-bottom: 8px;
+}
+
+.prompt-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.zone-name-input {
+  flex: 1;
+  padding: 8px 12px;
+  font-family: var(--font);
+  font-size: 14px;
+  border: 1.5px solid var(--amber);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.zone-name-input:focus { border-color: var(--amber-dark); }
 
 /* ── side panel ───────────────────────────────────────────────────────────── */
 .panel-side {
@@ -227,18 +352,121 @@ html, body {
   color: #fff;
 }
 
-.btn-start:not(:disabled):hover {
-  background: var(--amber-dark);
-}
+.btn-start:not(:disabled):hover { background: var(--amber-dark); }
 
 .btn-stop {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
+  flex: 0 0 auto;
+  padding: 10px 20px;
 }
 
-.btn-stop:not(:disabled):hover {
-  background: #F5F5F0;
+.btn-stop:not(:disabled):hover { background: #F5F5F0; }
+
+/* smaller utility buttons */
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.btn-sm:hover { background: var(--bg); }
+
+.btn-sm.btn-draw-active {
+  background: var(--amber-light);
+  border-color: var(--amber);
+  color: var(--amber-dark);
+}
+
+.btn-sm.btn-danger {
+  color: #DC2626;
+  border-color: #FECACA;
+}
+
+.btn-sm.btn-danger:hover { background: #FEF2F2; }
+
+.btn-confirm {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--amber);
+  color: #fff;
+  cursor: pointer;
+}
+
+.btn-confirm:hover { background: var(--amber-dark); }
+
+.btn-cancel-sm {
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+/* ── zones card ───────────────────────────────────────────────────────────── */
+.zones-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.zones-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.zones-list {
+  padding: 8px 0;
+  min-height: 40px;
+}
+
+.zone-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.zone-item:hover { background: var(--bg); }
+
+.zone-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--amber);
+  flex-shrink: 0;
+}
+
+.zone-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zones-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-faint);
 }
 
 /* ── alerts card ──────────────────────────────────────────────────────────── */
@@ -277,7 +505,7 @@ html, body {
 }
 
 .alerts-list {
-  max-height: 520px;
+  max-height: 440px;
   overflow-y: auto;
   scroll-behavior: smooth;
 }
@@ -308,9 +536,7 @@ html, body {
   animation: slideIn 0.2s ease;
 }
 
-.alert-card:last-child {
-  border-bottom: none;
-}
+.alert-card:last-child { border-bottom: none; }
 
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(-6px); }
@@ -360,6 +586,19 @@ html, body {
   flex-shrink: 0;
 }
 
+.zone-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: #FFF7ED;
+  color: #C2410C;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 99px;
+  border: 1px solid #FED7AA;
+  flex-shrink: 0;
+}
+
 .alert-explanation {
   font-size: 13.5px;
   color: var(--text);
@@ -381,13 +620,8 @@ html, body {
     padding: 16px;
   }
 
-  .panel-camera {
-    position: static;
-  }
-
-  .alerts-list {
-    max-height: 400px;
-  }
+  .panel-camera { position: static; }
+  .alerts-list  { max-height: 360px; }
 }
 
 @media (max-width: 480px) {
