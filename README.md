@@ -1,6 +1,6 @@
 # OpenEye
 
-AI camera monitor: point a webcam at a scene, describe a rule in plain English, and get alerts (with saved frames) whenever the rule is triggered — powered by Qwen-VL.
+AI camera monitor: point a webcam at a scene, describe a rule in plain English, and get alerts (with saved frames) whenever the rule is triggered -powered by Qwen-VL.
 
 ## Setup
 
