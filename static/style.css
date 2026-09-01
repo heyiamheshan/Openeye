@@ -108,8 +108,9 @@ html, body {
 
 /* ── camera panel ─────────────────────────────────────────────────────────── */
 .panel-camera {
-  position: sticky;
-  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .camera-frame {
@@ -270,6 +271,8 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: sticky;
+  top: 80px;
 }
 
 /* ── shared card ──────────────────────────────────────────────────────────── */
@@ -621,6 +624,7 @@ html, body {
   }
 
   .panel-camera { position: static; }
+  .panel-side   { position: static; }
   .alerts-list  { max-height: 360px; }
 }
 

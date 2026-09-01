@@ -61,10 +61,7 @@
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- ── right: rule + zones + alerts ── -->
-    <aside class="panel-side">
       <!-- rule input -->
       <div class="card rule-card">
         <label class="rule-label" for="ruleInput">Monitoring Rule</label>
@@ -85,17 +82,6 @@
         </div>
       </div>
 
-      <!-- zones -->
-      <div class="card zones-card">
-        <div class="zones-header">
-          <h2 class="section-title">Zones</h2>
-          <button class="btn-sm" onclick="clearAllZones()">Clear All</button>
-        </div>
-        <div class="zones-list" id="zonesList">
-          <p class="zones-empty" id="zonesEmpty">No zones defined yet.</p>
-        </div>
-      </div>
-
       <!-- alert feed -->
       <div class="card alerts-card">
         <div class="alerts-header">
@@ -107,6 +93,20 @@
             <p>No alerts yet.</p>
             <p class="empty-hint">Alerts will appear here when your rule is triggered.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── right: zones ── -->
+    <aside class="panel-side">
+      <!-- zones -->
+      <div class="card zones-card">
+        <div class="zones-header">
+          <h2 class="section-title">Zones</h2>
+          <button class="btn-sm" onclick="clearAllZones()">Clear All</button>
+        </div>
+        <div class="zones-list" id="zonesList">
+          <p class="zones-empty" id="zonesEmpty">No zones defined yet.</p>
         </div>
       </div>
     </aside>
