@@ -95,6 +95,33 @@ html, body {
   50%       { box-shadow: 0 0 0 5px #D1FAE5; }
 }
 
+/* ── source toolbar (Live Camera / Demo Video) ───────────────────────────── */
+.source-toolbar {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.demo-upload {
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.demo-upload.visible { display: flex; }
+
+.demo-upload input[type="file"] {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 220px;
+}
+
 /* ── layout ───────────────────────────────────────────────────────────────── */
 .layout {
   max-width: 1400px;

@@ -15,7 +15,40 @@ import urllib3
 from PIL import Image
 
 import config
+import runtime_state
 import zones_store
+
+_demo_lock = threading.Lock()
+_demo_cap: cv2.VideoCapture | None = None
+_demo_cap_path: str | None = None
+
+
+def _get_demo_capture(path: str) -> cv2.VideoCapture:
+    global _demo_cap, _demo_cap_path
+    if _demo_cap is None or _demo_cap_path != path or not _demo_cap.isOpened():
+        if _demo_cap is not None:
+            _demo_cap.release()
+        _demo_cap = cv2.VideoCapture(path)
+        _demo_cap_path = path
+    return _demo_cap
+
+
+def _fetch_demo_frame(path: str) -> bytes:
+    with _demo_lock:
+        cap = _get_demo_capture(path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open demo video: {path}")
+        ok, frame = cap.read()
+        if not ok:
+            # loop back to the start
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = cap.read()
+        if not ok:
+            raise RuntimeError("Failed to read frame from demo video")
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+        raise RuntimeError("Failed to encode frame as JPEG")
+    return buf.tobytes()
 
 
 def point_in_polygon(point: tuple, polygon: list) -> bool:
@@ -36,6 +69,12 @@ def point_in_polygon(point: tuple, polygon: list) -> bool:
 
 
 def fetch_frame() -> bytes:
+    if runtime_state.get_demo_mode():
+        path = runtime_state.get_video_path()
+        if not path:
+            raise RuntimeError("Demo mode is enabled but no video has been uploaded")
+        return _fetch_demo_frame(path)
+
     cap = cv2.VideoCapture(config.CAMERA_INDEX)
     try:
         if not cap.isOpened():

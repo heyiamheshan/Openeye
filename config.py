@@ -13,3 +13,7 @@ MODEL = os.environ.get("VL_MODEL", "qwen3-vl-plus-2025-12-19")
 MAX_LONG_SIDE = int(os.environ.get("MAX_LONG_SIDE", "1280"))
 CAMERA_WARMUP_FRAMES = int(os.environ.get("CAMERA_WARMUP_FRAMES", "5"))
 ALERTS_DIR = os.environ.get("ALERTS_DIR", "alerts")
+
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").strip().lower() == "true"
+DEMO_VIDEO_PATH = os.environ.get("DEMO_VIDEO_PATH", "")
+UPLOADS_DIR = os.environ.get("UPLOADS_DIR", "uploads")
