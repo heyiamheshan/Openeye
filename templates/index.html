@@ -26,11 +26,6 @@
       <input type="radio" name="feedMode" id="modeDemo" value="demo" />
       Demo Video
     </label>
-    <div class="demo-upload" id="demoUpload">
-      <input type="file" id="demoVideoInput" accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo" />
-      <button class="btn-sm" onclick="uploadDemoVideo()">Upload</button>
-      <span class="toolbar-hint" id="demoUploadHint"></span>
-    </div>
   </div>
 
   <main class="layout">
@@ -78,9 +73,15 @@
         </div>
       </div>
 
-      <!-- rule input -->
-      <div class="card rule-card">
+      <!-- rule input (live camera mode) -->
+      <div class="card rule-card" id="liveRuleCard">
+        <div class="rule-library-toggle-row">
+          <button class="btn-sm" id="liveLibraryBtn" onclick="toggleRuleLibrary('live')">Rule Library</button>
+        </div>
+        <div class="rule-library-panel" id="liveLibraryPanel" style="display:none;"></div>
+
         <label class="rule-label" for="ruleInput">Monitoring Rule</label>
+        <p class="rule-hint">Use the Rule Library above, or type your own rule below.</p>
         <textarea
           id="ruleInput"
           class="rule-input"
@@ -95,6 +96,56 @@
           <button class="btn btn-stop" id="stopBtn" onclick="stopMonitoring()" disabled>
             Stop
           </button>
+        </div>
+      </div>
+
+      <!-- demo video panel (demo mode) -->
+      <div class="card demo-panel" id="demoPanel" style="display:none;">
+        <!-- stage 1 + 2: rule entry + source selection -->
+        <div class="demo-stage" id="demoSetup">
+          <div class="rule-library-toggle-row">
+            <button class="btn-sm" id="demoLibraryBtn" onclick="toggleRuleLibrary('demo')">Rule Library</button>
+          </div>
+          <div class="rule-library-panel" id="demoLibraryPanel" style="display:none;"></div>
+
+          <label class="rule-label" for="demoRuleInput">Monitoring Rule</label>
+          <p class="rule-hint">Use the Rule Library above, or type your own rule below.</p>
+          <textarea
+            id="demoRuleInput"
+            class="rule-input"
+            rows="3"
+            placeholder="Alert me if someone enters the yellow zone"
+            spellcheck="false"
+          ></textarea>
+
+          <div class="demo-source-row">
+            <button class="btn-sm" id="useSampleBtn" disabled onclick="useSampleVideo()">Use sample video</button>
+            <button class="btn-sm" id="uploadVideoBtn" disabled onclick="triggerDemoUpload()">Upload video</button>
+            <button class="btn-sm btn-draw-active" id="rerunSameBtn" style="display:none;" onclick="startDemoRun()">Analyse loaded video</button>
+            <input
+              type="file"
+              id="demoVideoInput"
+              accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo"
+              style="display:none;"
+              onchange="onDemoVideoChosen()"
+            />
+          </div>
+          <span class="toolbar-hint" id="demoSetupHint"></span>
+        </div>
+
+        <!-- stage 3: analysis run -->
+        <div class="demo-stage" id="demoRun" style="display:none;">
+          <p class="demo-progress" id="demoProgress">Analysing frame 0 of 0</p>
+          <button class="btn-sm btn-danger" onclick="cancelDemoRun()">Cancel</button>
+        </div>
+
+        <!-- stage 4: results -->
+        <div class="demo-stage" id="demoResults" style="display:none;">
+          <p class="demo-summary" id="demoSummary"></p>
+          <div class="demo-result-actions">
+            <button class="btn-sm" onclick="tryAnotherRule()">Try another rule</button>
+            <button class="btn-sm" onclick="newVideo()">New video</button>
+          </div>
         </div>
       </div>
 

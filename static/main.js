@@ -19,9 +19,22 @@ const nameInput = document.getElementById('zoneNameInput');
 
 const modeLive        = document.getElementById('modeLive');
 const modeDemo        = document.getElementById('modeDemo');
-const demoUploadEl    = document.getElementById('demoUpload');
-const demoVideoInput  = document.getElementById('demoVideoInput');
-const demoUploadHint  = document.getElementById('demoUploadHint');
+const liveRuleCard    = document.getElementById('liveRuleCard');
+const demoPanelEl     = document.getElementById('demoPanel');
+const cameraOverlayEl = document.getElementById('cameraOverlay');
+
+const demoRuleInput  = document.getElementById('demoRuleInput');
+const useSampleBtn   = document.getElementById('useSampleBtn');
+const uploadVideoBtn = document.getElementById('uploadVideoBtn');
+const rerunSameBtn   = document.getElementById('rerunSameBtn');
+const demoVideoInput = document.getElementById('demoVideoInput');
+const demoSetupHint  = document.getElementById('demoSetupHint');
+
+const demoSetupEl    = document.getElementById('demoSetup');
+const demoRunEl      = document.getElementById('demoRun');
+const demoResultsEl  = document.getElementById('demoResults');
+const demoProgressEl = document.getElementById('demoProgress');
+const demoSummaryEl  = document.getElementById('demoSummary');
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const AMBER_FILL        = 'rgba(245,158,11,0.22)';
@@ -775,45 +788,287 @@ function escapeHtml(str) {
   const d = document.createElement('div'); d.textContent = str; return d.innerHTML;
 }
 
-// ── demo mode ─────────────────────────────────────────────────────────────────
+// ── mode switch (Live Camera vs Demo Video) ─────────────────────────────────
+// Live camera mode is untouched — startMonitoring/stopMonitoring/pollAlerts
+// above still drive it exactly as before. Demo mode uses the 4-stage flow below.
 function onFeedModeChange() {
   const demo = modeDemo.checked;
-  demoUploadEl.classList.toggle('visible', demo);
-  fetch('/demo_mode', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ demo_mode: demo }),
-  }).catch(() => {});
-}
+  liveRuleCard.style.display = demo ? 'none' : '';
+  demoPanelEl.style.display  = demo ? '' : 'none';
 
+  if (demo) {
+    feedImg.src = '';
+    cameraOverlayEl.style.display = 'flex';
+    cameraOverlayEl.querySelector('span').textContent = 'Load a video to begin';
+  } else {
+    cameraOverlayEl.style.display = 'none';
+    feedImg.src = '/video_feed';
+  }
+}
 modeLive.addEventListener('change', onFeedModeChange);
 modeDemo.addEventListener('change', onFeedModeChange);
 
-function uploadDemoVideo() {
-  const file = demoVideoInput.files[0];
-  if (!file) { demoUploadHint.textContent = 'Choose a file first'; return; }
+// ── demo mode: 4-stage flow ─────────────────────────────────────────────────
+let demoVideoReady   = false;  // a video (sample or uploaded) is loaded server-side
+let demoPollInterval = null;
 
+function updateDemoSourceButtons() {
+  const hasRule = demoRuleInput.value.trim().length > 0;
+  useSampleBtn.disabled = !hasRule;
+  uploadVideoBtn.disabled = !hasRule;
+  rerunSameBtn.style.display = (demoVideoReady && hasRule) ? '' : 'none';
+}
+demoRuleInput.addEventListener('input', updateDemoSourceButtons);
+
+function useSampleVideo() {
+  if (useSampleBtn.disabled) return;
+  demoSetupHint.textContent = 'Loading sample video…';
+  fetch('/demo_run/load_sample', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { demoSetupHint.textContent = d.error || 'Failed to load sample video'; return; }
+      demoVideoReady = true;
+      demoSetupHint.textContent = '';
+      startDemoRun();
+    })
+    .catch(() => { demoSetupHint.textContent = 'Failed to load sample video'; });
+}
+
+function triggerDemoUpload() {
+  if (uploadVideoBtn.disabled) return;
+  demoVideoInput.click();
+}
+
+function onDemoVideoChosen() {
+  const file = demoVideoInput.files[0];
+  if (!file) return;
   const form = new FormData();
   form.append('video', file);
-  demoUploadHint.textContent = 'Uploading…';
-
+  demoSetupHint.textContent = 'Uploading…';
   fetch('/upload_video', { method: 'POST', body: form })
     .then(r => r.json())
     .then(d => {
-      demoUploadHint.textContent = d.ok ? 'Uploaded ✓' : (d.error || 'Upload failed');
+      if (!d.ok) { demoSetupHint.textContent = d.error || 'Upload failed'; return; }
+      demoVideoReady = true;
+      demoSetupHint.textContent = '';
+      startDemoRun();
     })
-    .catch(() => { demoUploadHint.textContent = 'Upload failed'; });
+    .catch(() => { demoSetupHint.textContent = 'Upload failed'; });
 }
 
-function loadDemoState() {
-  fetch('/demo_mode').then(r => r.json()).then(d => {
-    modeLive.checked = !d.demo_mode;
-    modeDemo.checked = d.demo_mode;
-    demoUploadEl.classList.toggle('visible', d.demo_mode);
+function startDemoRun() {
+  const rule = demoRuleInput.value.trim();
+  if (!rule) return;
+  demoSetupHint.textContent = '';
+  fetch('/demo_run/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rule }),
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { demoSetupHint.textContent = d.error || 'Failed to start run'; return; }
+      cameraOverlayEl.style.display = 'none';
+      resetAlertsUI();
+      showDemoStage('run');
+      demoProgressEl.textContent = 'Analysing frame 0 of 0';
+      if (demoPollInterval) clearInterval(demoPollInterval);
+      demoPollInterval = setInterval(pollDemoRun, 700);
+      pollDemoRun();
+    })
+    .catch(() => { demoSetupHint.textContent = 'Failed to start run'; });
+}
+
+function pollDemoRun() {
+  fetch('/demo_run/status').then(r => r.json()).then(d => {
+    if (!d.active) return;
+    demoProgressEl.textContent = `Analysing frame ${d.current_index} of ${d.total}`;
+    feedImg.src = `/demo_run/frame?ts=${Date.now()}`;
+    renderAlerts(d.alerts);
+
+    if (d.done) {
+      clearInterval(demoPollInterval);
+      demoPollInterval = null;
+      const count = d.alerts.length;
+      demoSummaryEl.textContent = `Analysed ${d.total} frame${d.total === 1 ? '' : 's'} — ${count} alert${count === 1 ? '' : 's'} triggered`;
+      showDemoStage('results');
+    }
   }).catch(() => {});
 }
 
+function cancelDemoRun() {
+  fetch('/demo_run/cancel', { method: 'POST' }).then(() => {
+    if (demoPollInterval) { clearInterval(demoPollInterval); demoPollInterval = null; }
+    showDemoStage('setup');
+  });
+}
+
+function tryAnotherRule() {
+  demoRuleInput.value = '';
+  updateDemoSourceButtons();
+  showDemoStage('setup');
+}
+
+function newVideo() {
+  demoVideoReady = false;
+  demoRuleInput.value = '';
+  demoVideoInput.value = '';
+  updateDemoSourceButtons();
+  cameraOverlayEl.style.display = 'flex';
+  cameraOverlayEl.querySelector('span').textContent = 'Load a video to begin';
+  showDemoStage('setup');
+}
+
+function showDemoStage(stage) {
+  demoSetupEl.style.display   = stage === 'setup'   ? '' : 'none';
+  demoRunEl.style.display     = stage === 'run'      ? '' : 'none';
+  demoResultsEl.style.display = stage === 'results'  ? '' : 'none';
+}
+
+function resetAlertsUI() {
+  knownIds.clear();
+  const list = document.getElementById('alertsList');
+  const empty = document.getElementById('emptyState');
+  list.querySelectorAll('.alert-card').forEach(el => el.remove());
+  empty.style.display = '';
+  document.getElementById('alertCount').textContent = '0';
+}
+
+// ── rule library ──────────────────────────────────────────────────────────────
+// Note: the app only supports one active rule at a time (live or demo), not a
+// multi-rule list — so "adding" a library rule fills the single rule textarea,
+// exactly as if the user had typed it themselves.
+const RULE_LIBRARY = [
+  { category: 'Zone-Based Rules', rules: [
+    "Alert if a person enters the machine danger zone",
+    "Alert if anyone crosses the restricted area boundary",
+    "Alert if a worker is standing inside the yellow safety zone",
+    "Alert if a person is in the no-entry zone",
+  ]},
+  { category: 'Machine Interaction Rules', rules: [
+    "Alert if a person is reaching into running machinery",
+    "Alert if the machine safety guard is removed or missing",
+    "Alert if a worker's hand is too close to the cutting blade",
+    "Alert if someone is operating machinery without authorization",
+  ]},
+  { category: 'PPE & Safety Compliance', rules: [
+    "Alert if a worker is not wearing a helmet",
+    "Alert if a person is working without safety gloves",
+    "Alert if someone is operating machinery without protective eyewear",
+    "Alert if a worker is missing a high-visibility vest",
+  ]},
+  { category: 'Near-Miss Detection', rules: [
+    "Alert if a person is standing directly under a suspended load",
+    "Alert if someone is working alone in a hazardous area",
+    "Alert if a worker falls or collapses on the floor",
+    "Alert if a person is running in the factory floor",
+  ]},
+  { category: 'Operational Rules', rules: [
+    "Alert if the emergency exit is blocked",
+    "Alert if more than one person is operating the same machine",
+    "Alert if equipment is left unattended in a walkway",
+    "Alert if a fire extinguisher is missing from its mount",
+  ]},
+];
+
+const liveRuleInputEl = document.getElementById('ruleInput');
+
+const libraryTargets = {
+  live: {
+    input: () => liveRuleInputEl,
+    panel: () => document.getElementById('liveLibraryPanel'),
+    btn:   () => document.getElementById('liveLibraryBtn'),
+    onFill: () => {},
+  },
+  demo: {
+    input: () => demoRuleInput,
+    panel: () => document.getElementById('demoLibraryPanel'),
+    btn:   () => document.getElementById('demoLibraryBtn'),
+    onFill: () => updateDemoSourceButtons(),
+  },
+};
+
+let openLibrary = null; // 'live' | 'demo' | null
+
+function toggleRuleLibrary(which) {
+  if (openLibrary === which) { closeRuleLibrary(); return; }
+  closeRuleLibrary();
+  openLibrary = which;
+  renderRuleLibrary(which);
+  libraryTargets[which].panel().style.display = 'block';
+}
+
+function closeRuleLibrary() {
+  if (!openLibrary) return;
+  libraryTargets[openLibrary].panel().style.display = 'none';
+  openLibrary = null;
+}
+
+function renderRuleLibrary(which) {
+  const t = libraryTargets[which];
+  const panel = t.panel();
+  const currentValue = t.input().value.trim();
+  panel.innerHTML = '';
+
+  RULE_LIBRARY.forEach(cat => {
+    const catEl = document.createElement('div');
+    catEl.className = 'library-category';
+
+    const heading = document.createElement('div');
+    heading.className = 'library-category-title';
+    heading.textContent = cat.category;
+    catEl.appendChild(heading);
+
+    cat.rules.forEach(rule => {
+      const row = document.createElement('div');
+      row.className = 'library-rule-row';
+
+      const label = document.createElement('span');
+      label.className = 'library-rule-text';
+      label.textContent = rule;
+      row.appendChild(label);
+
+      if (currentValue === rule) {
+        row.classList.add('library-rule-added');
+        const check = document.createElement('span');
+        check.className = 'library-rule-check';
+        check.textContent = '✓';
+        row.appendChild(check);
+      } else {
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'library-add-btn';
+        addBtn.textContent = '+';
+        addBtn.onclick = (e) => { e.stopPropagation(); addLibraryRule(which, rule); };
+        row.appendChild(addBtn);
+      }
+
+      catEl.appendChild(row);
+    });
+
+    panel.appendChild(catEl);
+  });
+}
+
+function addLibraryRule(which, rule) {
+  const t = libraryTargets[which];
+  t.input().value = rule;
+  t.onFill();
+  renderRuleLibrary(which);
+}
+
+// close the open panel on outside click
+document.addEventListener('click', (e) => {
+  if (!openLibrary) return;
+  const t = libraryTargets[openLibrary];
+  if (t.panel().contains(e.target) || t.btn().contains(e.target)) return;
+  closeRuleLibrary();
+});
+
+// keep checkmarks in sync if the user edits the rule text manually
+liveRuleInputEl.addEventListener('input', () => { if (openLibrary === 'live') renderRuleLibrary('live'); });
+demoRuleInput.addEventListener('input', () => { if (openLibrary === 'demo') renderRuleLibrary('demo'); });
+
 // ── init ──────────────────────────────────────────────────────────────────────
 loadZones();
-loadDemoState();
 startPolling();

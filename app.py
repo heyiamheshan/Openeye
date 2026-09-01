@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 import config
 import runtime_state
 import zones_store
+from demo_runner import DemoRunThread
 from detector import DetectorThread
 
 app = Flask(__name__)
@@ -16,9 +17,13 @@ Path(config.ALERTS_DIR).mkdir(exist_ok=True)
 Path(config.UPLOADS_DIR).mkdir(exist_ok=True)
 
 ALLOWED_VIDEO_EXTS = {"mp4", "mov", "avi"}
+DEMO_SAMPLE_PATH = "demo/sample.mp4"
 
 _detector_thread: DetectorThread | None = None
 _detector_lock = threading.Lock()
+
+_demo_run_thread: DemoRunThread | None = None
+_demo_run_lock = threading.Lock()
 
 _camera_lock = threading.Lock()
 _camera: cv2.VideoCapture | None = None
@@ -131,6 +136,65 @@ def upload_video():
     file.save(filepath)
     runtime_state.set_video_path(str(filepath))
     return jsonify(ok=True, video_path=str(filepath))
+
+
+@app.route("/demo_run/load_sample", methods=["POST"])
+def load_sample_video():
+    if not Path(DEMO_SAMPLE_PATH).exists():
+        return jsonify(error="Sample video not found on server"), 404
+    runtime_state.set_video_path(DEMO_SAMPLE_PATH)
+    return jsonify(ok=True, video_path=DEMO_SAMPLE_PATH)
+
+
+@app.route("/demo_run/start", methods=["POST"])
+def demo_run_start():
+    global _demo_run_thread
+    data = request.get_json(silent=True) or {}
+    rule = data.get("rule", "").strip()
+    if not rule:
+        return jsonify(error="Rule is required"), 400
+    video_path = runtime_state.get_video_path()
+    if not video_path or not Path(video_path).exists():
+        return jsonify(error="No video loaded"), 400
+
+    with _demo_run_lock:
+        if _demo_run_thread is not None and _demo_run_thread.is_alive() and not _demo_run_thread.done:
+            return jsonify(error="A demo run is already in progress"), 409
+        _demo_run_thread = DemoRunThread(rule, video_path)
+        _demo_run_thread.start()
+
+    return jsonify(ok=True)
+
+
+@app.route("/demo_run/status")
+def demo_run_status():
+    with _demo_run_lock:
+        thread = _demo_run_thread
+    if thread is None:
+        return jsonify(active=False)
+    status = thread.get_status()
+    status["active"] = True
+    return jsonify(status)
+
+
+@app.route("/demo_run/frame")
+def demo_run_frame():
+    with _demo_run_lock:
+        thread = _demo_run_thread
+    if thread is None:
+        return jsonify(error="No demo run"), 404
+    frame = thread.get_current_frame()
+    if frame is None:
+        return jsonify(error="No frame yet"), 503
+    return Response(frame, mimetype="image/jpeg")
+
+
+@app.route("/demo_run/cancel", methods=["POST"])
+def demo_run_cancel():
+    with _demo_run_lock:
+        if _demo_run_thread is not None:
+            _demo_run_thread.cancel()
+    return jsonify(ok=True)
 
 
 @app.route("/start", methods=["POST"])
