@@ -10,6 +10,7 @@ from pathlib import Path
 from queue import Queue
 
 import cv2
+import numpy as np
 import requests
 import urllib3
 from PIL import Image
@@ -17,6 +18,15 @@ from PIL import Image
 import config
 import runtime_state
 import zones_store
+
+
+def _motion_score(prev_bytes: bytes, curr_bytes: bytes) -> float:
+    """Mean absolute pixel difference (grayscale) between two JPEG-encoded frames."""
+    prev_arr = cv2.imdecode(np.frombuffer(prev_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    curr_arr = cv2.imdecode(np.frombuffer(curr_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    if prev_arr is None or curr_arr is None or prev_arr.shape != curr_arr.shape:
+        return float("inf")  # can't compare — treat as motion so we don't get stuck skipping
+    return float(cv2.absdiff(prev_arr, curr_arr).mean())
 
 _demo_lock = threading.Lock()
 _demo_cap: cv2.VideoCapture | None = None
@@ -192,6 +202,7 @@ class DetectorThread(threading.Thread):
         self._active.set()
         self._alerts = deque(maxlen=10)
         self._lock = threading.Lock()
+        self._prev_frame_bytes = None
         Path(config.ALERTS_DIR).mkdir(exist_ok=True)
 
     def stop(self):
@@ -208,32 +219,43 @@ class DetectorThread(threading.Thread):
         while self._active.is_set():
             try:
                 raw_bytes = fetch_frame()
-                b64 = resize_and_encode(raw_bytes)
-                zones = zones_store.get_zones()
-                result = analyze_frame(b64, self.rule, zones)
 
-                triggered = result.get("triggered", False)
-                explanation = result.get("explanation", "")
-                confidence = round(float(result.get("confidence", 0.0)), 2)
-                zone_name = result.get("zone")
+                # motion gate — skip the API call entirely if nothing changed
+                motion_ok = True
+                if self._prev_frame_bytes is not None:
+                    score = _motion_score(self._prev_frame_bytes, raw_bytes)
+                    motion_ok = score >= config.MOTION_THRESHOLD
+                self._prev_frame_bytes = raw_bytes
 
-                if triggered:
-                    ts = datetime.now()
-                    filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-                    (Path(config.ALERTS_DIR) / filename).write_bytes(raw_bytes)
+                if not motion_ok:
+                    print("no motion — skipped")
+                else:
+                    b64 = resize_and_encode(raw_bytes)
+                    zones = zones_store.get_zones()
+                    result = analyze_frame(b64, self.rule, zones)
 
-                    alert = {
-                        "id": filename,
-                        "timestamp": ts.isoformat(timespec="seconds"),
-                        "rule": self.rule,
-                        "explanation": explanation,
-                        "confidence": confidence,
-                        "thumbnail": f"/alerts/{filename}",
-                        "zone": zone_name,
-                    }
-                    with self._lock:
-                        self._alerts.appendleft(alert)
-                    self.queue.put(alert)
+                    triggered = result.get("triggered", False)
+                    explanation = result.get("explanation", "")
+                    confidence = round(float(result.get("confidence", 0.0)), 2)
+                    zone_name = result.get("zone")
+
+                    if triggered:
+                        ts = datetime.now()
+                        filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+                        (Path(config.ALERTS_DIR) / filename).write_bytes(raw_bytes)
+
+                        alert = {
+                            "id": filename,
+                            "timestamp": ts.isoformat(timespec="seconds"),
+                            "rule": self.rule,
+                            "explanation": explanation,
+                            "confidence": confidence,
+                            "thumbnail": f"/alerts/{filename}",
+                            "zone": zone_name,
+                        }
+                        with self._lock:
+                            self._alerts.appendleft(alert)
+                        self.queue.put(alert)
             except Exception as exc:
                 self.queue.put({"error": str(exc)})
 
