@@ -7,6 +7,7 @@ from flask import Flask, Response, jsonify, render_template, request, send_from_
 from werkzeug.utils import secure_filename
 
 import config
+import rules_store
 import runtime_state
 import zones_store
 from demo_runner import DemoRunThread
@@ -149,10 +150,9 @@ def load_sample_video():
 @app.route("/demo_run/start", methods=["POST"])
 def demo_run_start():
     global _demo_run_thread
-    data = request.get_json(silent=True) or {}
-    rule = data.get("rule", "").strip()
-    if not rule:
-        return jsonify(error="Rule is required"), 400
+    enabled_rules = rules_store.get_enabled_rules()
+    if not enabled_rules:
+        return jsonify(error="Add at least one rule before selecting a video."), 400
     video_path = runtime_state.get_video_path()
     if not video_path or not Path(video_path).exists():
         return jsonify(error="No video loaded"), 400
@@ -160,7 +160,7 @@ def demo_run_start():
     with _demo_run_lock:
         if _demo_run_thread is not None and _demo_run_thread.is_alive() and not _demo_run_thread.done:
             return jsonify(error="A demo run is already in progress"), 409
-        _demo_run_thread = DemoRunThread(rule, video_path)
+        _demo_run_thread = DemoRunThread(enabled_rules, video_path)
         _demo_run_thread.start()
 
     return jsonify(ok=True)
@@ -258,6 +258,43 @@ def remove_zone(name):
     deleted = zones_store.delete_zone(name)
     if not deleted:
         return jsonify(error="Zone not found"), 404
+    affected_rule_ids = rules_store.clear_zone_references(name)
+    return jsonify(ok=True, affected_rule_ids=affected_rule_ids)
+
+
+@app.route("/rules")
+def get_rules():
+    return jsonify(rules=rules_store.get_rules())
+
+
+@app.route("/rules", methods=["POST"])
+def create_rule():
+    data = request.get_json(silent=True) or {}
+    rule_text = data.get("rule_text", data.get("text", "")).strip()
+    if not rule_text:
+        return jsonify(error="Rule text is required"), 400
+    zone_name = (data.get("zone_name") or "").strip() or None
+    if zone_name and zone_name not in zones_store.get_zones():
+        return jsonify(error="Unknown zone"), 400
+    rule = rules_store.add_rule(rule_text, zone_name)
+    return jsonify(ok=True, rule=rule)
+
+
+@app.route("/rules/<path:rule_id>/toggle", methods=["POST"])
+def toggle_rule(rule_id):
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled", True))
+    updated = rules_store.set_enabled(rule_id, enabled)
+    if not updated:
+        return jsonify(error="Rule not found"), 404
+    return jsonify(ok=True)
+
+
+@app.route("/rules/<path:rule_id>", methods=["DELETE"])
+def remove_rule(rule_id):
+    deleted = rules_store.delete_rule(rule_id)
+    if not deleted:
+        return jsonify(error="Rule not found"), 404
     return jsonify(ok=True)
 
 

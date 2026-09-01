@@ -1,12 +1,12 @@
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
 import cv2
 
 import config
-import zones_store
-from detector import analyze_frame, resize_and_encode
+from detector import _evaluate_rule, resize_and_encode
 
 TARGET_FRAMES = 30
 MAX_FRAMES = 40
@@ -24,11 +24,13 @@ def compute_sample_indices(frame_count: int) -> list:
 
 
 class DemoRunThread(threading.Thread):
-    """One-shot: samples ~30 frames from a video and analyses each against the rule."""
+    """One-shot: samples ~30 frames from a video; every enabled rule is evaluated
+    against each sampled frame in parallel (same ThreadPoolExecutor pattern as
+    live mode's DetectorThread)."""
 
-    def __init__(self, rule: str, video_path: str):
+    def __init__(self, rules: list, video_path: str):
         super().__init__(daemon=True)
-        self.rule = rule
+        self.rules = rules  # [{id, rule_text, zone_name, enabled}, ...]
         self.video_path = video_path
         self.total = 0
         self.current_index = 0  # 1-based count of frames processed so far
@@ -37,6 +39,7 @@ class DemoRunThread(threading.Thread):
         self.error = None
         self._alerts = []
         self._current_frame = None  # jpeg bytes of the frame currently displayed
+        self._current_rule_label = ""
         self._lock = threading.Lock()
         Path(config.ALERTS_DIR).mkdir(exist_ok=True)
 
@@ -52,6 +55,8 @@ class DemoRunThread(threading.Thread):
                 "cancelled": self.cancelled,
                 "error": self.error,
                 "alerts": list(self._alerts),
+                "current_rule_label": self._current_rule_label,
+                "rule_count": len(self.rules),
             }
 
     def get_current_frame(self):
@@ -72,7 +77,7 @@ class DemoRunThread(threading.Thread):
             with self._lock:
                 self.total = len(indices)
 
-            zones = zones_store.get_zones()
+            rule_label = ", ".join(r["rule_text"] for r in self.rules)
 
             for i, idx in enumerate(indices, start=1):
                 if self.cancelled:
@@ -91,30 +96,43 @@ class DemoRunThread(threading.Thread):
                 with self._lock:
                     self._current_frame = raw_bytes
                     self.current_index = i
+                    self._current_rule_label = rule_label
 
-                try:
-                    b64 = resize_and_encode(raw_bytes)
-                    result = analyze_frame(b64, self.rule, zones)
-                except Exception as exc:
-                    with self._lock:
-                        self.error = str(exc)
-                    continue
+                b64 = resize_and_encode(raw_bytes)
 
-                if result.get("triggered", False):
-                    ts = datetime.now()
-                    filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-                    (Path(config.ALERTS_DIR) / filename).write_bytes(raw_bytes)
-                    alert = {
-                        "id": filename,
-                        "timestamp": ts.isoformat(timespec="seconds"),
-                        "rule": self.rule,
-                        "explanation": result.get("explanation", ""),
-                        "confidence": round(float(result.get("confidence", 0.0)), 2),
-                        "thumbnail": f"/alerts/{filename}",
-                        "zone": result.get("zone"),
+                ts = datetime.now()
+                filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+                (Path(config.ALERTS_DIR) / filename).write_bytes(raw_bytes)
+
+                max_workers = min(len(self.rules), config.MAX_PARALLEL_RULES)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            _evaluate_rule, r["rule_text"], r.get("zone_name"), b64
+                        ): r
+                        for r in self.rules
                     }
-                    with self._lock:
-                        self._alerts.append(alert)
+                    for future in as_completed(futures):
+                        rule_entry = futures[future]
+                        try:
+                            result = future.result()
+                        except Exception as exc:
+                            print(f"rule '{rule_entry['rule_text']}' ERROR: {exc}")
+                            continue
+
+                        if result.get("triggered", False):
+                            alert = {
+                                "id": filename,
+                                "timestamp": ts.isoformat(timespec="seconds"),
+                                "rule": rule_entry["rule_text"],
+                                "explanation": result.get("explanation", ""),
+                                "confidence": round(float(result.get("confidence", 0.0)), 2),
+                                "thumbnail": f"/alerts/{filename}",
+                                "zone": result.get("zone"),
+                                "position_unverified": result.get("position_unverified", False),
+                            }
+                            with self._lock:
+                                self._alerts.append(alert)
         finally:
             cap.release()
             with self._lock:

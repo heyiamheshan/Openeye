@@ -4,6 +4,7 @@ import re
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -16,6 +17,7 @@ import urllib3
 from PIL import Image
 
 import config
+import rules_store
 import runtime_state
 import zones_store
 
@@ -59,6 +61,25 @@ def _fetch_demo_frame(path: str) -> bytes:
     if not ok:
         raise RuntimeError("Failed to encode frame as JPEG")
     return buf.tobytes()
+
+
+def _normalize_bbox(bbox: list, b64_image: str) -> list | None:
+    """The model is asked for normalised 0-1 bbox coords but sometimes returns
+    pixel coordinates instead. Detect that and rescale using the actual decoded
+    image dimensions, so the zone polygon check (also normalised 0-1) is valid."""
+    if not bbox or len(bbox) != 4:
+        return bbox
+    x1, y1, x2, y2 = bbox
+    if max(x1, y1, x2, y2) <= 1.5:
+        return bbox  # already normalised (small overshoot tolerance)
+    try:
+        img = Image.open(BytesIO(base64.b64decode(b64_image)))
+        w, h = img.size
+        if w == 0 or h == 0:
+            return None
+        return [x1 / w, y1 / h, x2 / w, y2 / h]
+    except Exception:
+        return None  # can't verify — treat as unavailable, not as "outside"
 
 
 def point_in_polygon(point: tuple, polygon: list) -> bool:
@@ -114,21 +135,26 @@ def resize_and_encode(image_bytes: bytes) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def analyze_frame(b64_image: str, rule: str, zones: dict | None = None) -> dict:
+def analyze_frame(b64_image: str, rule_text: str, zone_name: str | None = None) -> dict:
+    """Evaluates a single rule against a frame. If zone_name is given, the rule
+    is scoped to that zone's polygon only (looked up fresh from zones_store) —
+    activity elsewhere in the frame should not trigger it."""
+    zone_points = zones_store.get_zones().get(zone_name) if zone_name else None
+
     prompt = (
-        f"Rule: {rule}. "
+        f"Rule: {rule_text}. "
         "Does this frame violate the rule? "
         'Respond ONLY with JSON: {"triggered": true or false, '
         '"explanation": "one sentence", "confidence": 0.0 to 1.0, '
         '"bbox": [x1,y1,x2,y2] or null (normalised 0-1 coordinates of the '
         "relevant person/object, or null if none)}"
     )
-    if zones:
-        zone_desc = "; ".join(f"{name}: polygon points {points}" for name, points in zones.items())
+    if zone_points:
         prompt += (
-            " The following named zones are defined on this frame (normalised 0-1 coordinates): "
-            f"{zone_desc}. If a person or object is detected inside any zone, mention the zone "
-            "name in your explanation and set triggered to true."
+            f" This rule applies only to the zone '{zone_name}', defined by polygon "
+            f"points {zone_points} (normalised 0-1 coordinates). Only consider "
+            "activity inside this zone when deciding whether to trigger; ignore "
+            "activity elsewhere in the frame."
         )
     payload = {
         "model": config.MODEL,
@@ -169,19 +195,42 @@ def analyze_frame(b64_image: str, rule: str, zones: dict | None = None) -> dict:
     raw = resp.json()["choices"][0]["message"]["content"]
     result = parse_response(raw)
 
-    zone_name = None
-    bbox = result.get("bbox")
-    if zones and bbox and len(bbox) == 4:
-        x1, y1, x2, y2 = bbox
-        center = ((x1 + x2) / 2, (y1 + y2) / 2)
-        for name, points in zones.items():
-            if point_in_polygon(center, points):
-                zone_name = name
-                result["triggered"] = True
-                explanation = result.get("explanation", "").rstrip(".")
-                result["explanation"] = f"{explanation} (inside zone '{name}')."
-                break
+    triggered = result.get("triggered", False)
+    bbox = _normalize_bbox(result.get("bbox"), b64_image)
+    position_unverified = False
+
+    if not triggered:
+        print(f"Rule '{rule_text}' — not triggered — skipped")
+    elif zone_points:
+        if bbox and len(bbox) == 4:
+            x1, y1, x2, y2 = bbox
+            center = ((x1 + x2) / 2, (y1 + y2) / 2)
+            cx, cy = round(center[0], 3), round(center[1], 3)
+            if point_in_polygon(center, zone_points):
+                print(
+                    f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
+                    f"bbox centre [{cx},{cy}] — INSIDE zone — alert created"
+                )
+            else:
+                print(
+                    f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
+                    f"bbox centre [{cx},{cy}] — OUTSIDE zone — alert suppressed"
+                )
+                triggered = False
+        else:
+            # triggered=true but no bbox to verify against the zone geometrically —
+            # trust the model, but flag the alert as unverified
+            position_unverified = True
+            print(
+                f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
+                "no bbox returned — position unverified — alert created"
+            )
+    else:
+        print(f"Rule '{rule_text}' — triggered — whole frame rule — alert created")
+
+    result["triggered"] = triggered
     result["zone"] = zone_name
+    result["position_unverified"] = position_unverified
     return result
 
 
@@ -189,6 +238,18 @@ def parse_response(raw: str) -> dict:
     # Strip markdown code fences if present
     cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
     return json.loads(cleaned)
+
+
+def _evaluate_rule(rule_text: str, zone_name: str | None, b64_image: str) -> dict:
+    """Runs in a worker thread — logs start/finish with millisecond timestamps
+    so overlapping runs are visible in the terminal as proof of parallelism."""
+    start_label = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    zone_label = f" zone='{zone_name}'" if zone_name else ""
+    print(f"[{start_label}] START  rule='{rule_text}'{zone_label}")
+    result = analyze_frame(b64_image, rule_text, zone_name)
+    finish_label = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    print(f"[{finish_label}] FINISH rule='{rule_text}'{zone_label} triggered={result.get('triggered')}")
+    return result
 
 
 class DetectorThread(threading.Thread):
@@ -230,32 +291,51 @@ class DetectorThread(threading.Thread):
                 if not motion_ok:
                     print("no motion — skipped")
                 else:
-                    b64 = resize_and_encode(raw_bytes)
-                    zones = zones_store.get_zones()
-                    result = analyze_frame(b64, self.rule, zones)
+                    enabled_rules = rules_store.get_enabled_rules()
+                    if not enabled_rules and self.rule:
+                        # fallback: no multi-rule list configured, use the single
+                        # rule this thread was started with (existing behaviour)
+                        enabled_rules = [{"id": None, "rule_text": self.rule, "zone_name": None}]
 
-                    triggered = result.get("triggered", False)
-                    explanation = result.get("explanation", "")
-                    confidence = round(float(result.get("confidence", 0.0)), 2)
-                    zone_name = result.get("zone")
+                    if enabled_rules:
+                        b64 = resize_and_encode(raw_bytes)
 
-                    if triggered:
+                        # save the evidence frame once — every rule that fires
+                        # this cycle shares the same saved frame path
                         ts = datetime.now()
                         filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
                         (Path(config.ALERTS_DIR) / filename).write_bytes(raw_bytes)
 
-                        alert = {
-                            "id": filename,
-                            "timestamp": ts.isoformat(timespec="seconds"),
-                            "rule": self.rule,
-                            "explanation": explanation,
-                            "confidence": confidence,
-                            "thumbnail": f"/alerts/{filename}",
-                            "zone": zone_name,
-                        }
-                        with self._lock:
-                            self._alerts.appendleft(alert)
-                        self.queue.put(alert)
+                        max_workers = min(len(enabled_rules), config.MAX_PARALLEL_RULES)
+                        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            futures = {
+                                executor.submit(
+                                    _evaluate_rule, r["rule_text"], r.get("zone_name"), b64
+                                ): r
+                                for r in enabled_rules
+                            }
+                            for future in as_completed(futures):
+                                rule_entry = futures[future]
+                                try:
+                                    result = future.result()
+                                except Exception as exc:
+                                    print(f"rule '{rule_entry['rule_text']}' ERROR: {exc}")
+                                    continue
+
+                                if result.get("triggered", False):
+                                    alert = {
+                                        "id": filename,
+                                        "timestamp": ts.isoformat(timespec="seconds"),
+                                        "rule": rule_entry["rule_text"],
+                                        "explanation": result.get("explanation", ""),
+                                        "confidence": round(float(result.get("confidence", 0.0)), 2),
+                                        "thumbnail": f"/alerts/{filename}",
+                                        "zone": result.get("zone"),
+                                        "position_unverified": result.get("position_unverified", False),
+                                    }
+                                    with self._lock:
+                                        self._alerts.appendleft(alert)
+                                    self.queue.put(alert)
             except Exception as exc:
                 self.queue.put({"error": str(exc)})
 

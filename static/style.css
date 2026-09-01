@@ -472,6 +472,190 @@ html, body {
   gap: 8px;
 }
 
+/* ── example chips (add directly to the active rules list) ──────────────────── */
+.example-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chips-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chip:hover {
+  background: var(--amber-light);
+  border-color: var(--amber);
+  color: var(--amber-dark);
+}
+
+/* ── active rules list ────────────────────────────────────────────────────── */
+.rule-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.zone-select {
+  flex: 1;
+  padding: 8px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.zone-select:focus {
+  border-color: var(--amber);
+}
+
+.active-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rules-empty {
+  padding: 10px 0;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.rule-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.rule-item.rule-disabled {
+  opacity: 0.55;
+}
+
+.rule-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rule-item-text {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.rule-item-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rule-zone-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--amber-light);
+  color: var(--amber-dark);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 99px;
+}
+
+.rule-warning-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: #FEF2F2;
+  color: #B91C1C;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 99px;
+}
+
+.rule-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rule-item-actions input[type="checkbox"] {
+  accent-color: var(--amber);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.rule-item-delete {
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.rule-item-delete:hover { color: #DC2626; }
+
+/* ── zone → rules sub-list ────────────────────────────────────────────────── */
+.zone-rules-sublist {
+  margin: 4px 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.zone-rule-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.zone-rule-check {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.zone-rules-none {
+  margin: 4px 0 0 18px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 /* ── buttons ──────────────────────────────────────────────────────────────── */
 .btn {
   flex: 1;
@@ -585,14 +769,20 @@ html, body {
 
 .zone-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 16px;
-  gap: 8px;
   font-size: 13px;
 }
 
 .zone-item:hover { background: var(--bg); }
+
+.zone-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 
 .zone-dot {
   width: 10px;

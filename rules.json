@@ -1,0 +1,9 @@
+[
+  {
+    "id": "5c639f6d6f274f0e811453ed00c602ec",
+    "rule_text": "Is a person visible?",
+    "zone_name": "Centre Zone",
+    "enabled": true,
+    "zone_name_cleared": false
+  }
+]

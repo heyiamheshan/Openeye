@@ -19,22 +19,24 @@ const nameInput = document.getElementById('zoneNameInput');
 
 const modeLive        = document.getElementById('modeLive');
 const modeDemo        = document.getElementById('modeDemo');
-const liveRuleCard    = document.getElementById('liveRuleCard');
+const liveActionsEl   = document.getElementById('liveActionsCard');
 const demoPanelEl     = document.getElementById('demoPanel');
 const cameraOverlayEl = document.getElementById('cameraOverlay');
 
-const demoRuleInput  = document.getElementById('demoRuleInput');
-const useSampleBtn   = document.getElementById('useSampleBtn');
-const uploadVideoBtn = document.getElementById('uploadVideoBtn');
-const rerunSameBtn   = document.getElementById('rerunSameBtn');
-const demoVideoInput = document.getElementById('demoVideoInput');
-const demoSetupHint  = document.getElementById('demoSetupHint');
+const useSampleBtn    = document.getElementById('useSampleBtn');
+const uploadVideoBtn  = document.getElementById('uploadVideoBtn');
+const demoVideoInput  = document.getElementById('demoVideoInput');
+const demoSourceHintEl = document.getElementById('demoSourceHint');
 
-const demoSetupEl    = document.getElementById('demoSetup');
-const demoRunEl      = document.getElementById('demoRun');
-const demoResultsEl  = document.getElementById('demoResults');
-const demoProgressEl = document.getElementById('demoProgress');
-const demoSummaryEl  = document.getElementById('demoSummary');
+const demoSourceStageEl  = document.getElementById('demoSourceStage');
+const demoRunStageEl     = document.getElementById('demoRunStage');
+const demoResultsStageEl = document.getElementById('demoResultsStage');
+const demoProgressEl     = document.getElementById('demoProgress');
+const demoSummaryEl      = document.getElementById('demoSummary');
+
+const ruleZoneSelectEl   = document.getElementById('ruleZoneSelect');
+const activeRulesListEl  = document.getElementById('activeRulesList');
+let activeRules = [];  // [{id, rule_text, zone_name, enabled, zone_name_cleared}, ...]
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const AMBER_FILL        = 'rgba(245,158,11,0.22)';
@@ -681,30 +683,172 @@ function renderZoneList() {
   names.forEach(name => {
     const item = document.createElement('div');
     item.className = 'zone-item';
-    item.innerHTML = `
+
+    const row = document.createElement('div');
+    row.className = 'zone-item-row';
+    row.innerHTML = `
       <span class="zone-dot"></span>
       <span class="zone-name">${escapeHtml(name)}</span>
       <button class="btn-sm btn-danger" onclick="deleteZone(${JSON.stringify(name)})">Delete</button>
     `;
+    item.appendChild(row);
+
+    const assigned = activeRules.filter(r => r.zone_name === name);
+    if (assigned.length === 0) {
+      const none = document.createElement('p');
+      none.className = 'zone-rules-none';
+      none.textContent = 'No rules assigned';
+      item.appendChild(none);
+    } else {
+      const sub = document.createElement('div');
+      sub.className = 'zone-rules-sublist';
+      assigned.forEach(r => {
+        const row2 = document.createElement('div');
+        row2.className = 'zone-rule-row';
+        row2.innerHTML = `<span class="zone-rule-check">✓</span><span>${escapeHtml(r.rule_text)}</span>`;
+        sub.appendChild(row2);
+      });
+      item.appendChild(sub);
+    }
+
     list.appendChild(item);
+  });
+}
+
+function populateZoneSelects() {
+  const names = Object.keys(savedZones);
+  [document.getElementById('ruleZoneSelect'), document.getElementById('demoZoneSelect')].forEach(select => {
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = '<option value="">Whole frame</option>' +
+      names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    if (names.includes(current)) select.value = current;
   });
 }
 
 function deleteZone(name) {
   fetch(`/zones/${encodeURIComponent(name)}`, { method: 'DELETE' })
     .then(r => r.json())
-    .then(d => { if (d.ok) { delete savedZones[name]; redraw(); renderZoneList(); } });
+    .then(d => {
+      if (d.ok) {
+        delete savedZones[name];
+        redraw();
+        populateZoneSelects();
+        loadActiveRules();
+        renderZoneList();
+      }
+    });
 }
 
 function clearAllZones() {
   Promise.all(
     Object.keys(savedZones).map(n => fetch(`/zones/${encodeURIComponent(n)}`, { method: 'DELETE' }))
-  ).then(() => { savedZones = {}; redraw(); renderZoneList(); });
+  ).then(() => {
+    savedZones = {};
+    redraw();
+    populateZoneSelects();
+    loadActiveRules();
+    renderZoneList();
+  });
 }
 
 function loadZones() {
   fetch('/zones').then(r => r.json())
-    .then(d => { savedZones = d.zones || {}; syncCanvasSize(); renderZoneList(); });
+    .then(d => {
+      savedZones = d.zones || {};
+      syncCanvasSize();
+      populateZoneSelects();
+      renderZoneList();
+    });
+}
+
+// ── active rules (many-to-many with zones) ──────────────────────────────────
+function loadActiveRules() {
+  fetch('/rules').then(r => r.json())
+    .then(d => {
+      activeRules = d.rules || [];
+      renderActiveRulesList();
+      renderZoneList();
+      updateDemoSourceButtons();
+    })
+    .catch(() => {});
+}
+
+function renderActiveRulesList() {
+  if (!activeRulesListEl) return;
+  if (activeRules.length === 0) {
+    activeRulesListEl.innerHTML = '<p class="rules-empty" id="rulesEmpty">No rules added yet.</p>';
+    return;
+  }
+  activeRulesListEl.innerHTML = '';
+  activeRules.forEach(rule => {
+    const item = document.createElement('div');
+    item.className = 'rule-item' + (rule.enabled ? '' : ' rule-disabled');
+
+    const zoneBadge = rule.zone_name
+      ? `<span class="rule-zone-badge">${escapeHtml(rule.zone_name)}</span>`
+      : '';
+    const warningBadge = (!rule.zone_name && rule.zone_name_cleared)
+      ? `<span class="rule-warning-badge">Zone deleted — evaluating whole frame</span>`
+      : '';
+
+    item.innerHTML = `
+      <div class="rule-item-main">
+        <span class="rule-item-text">${escapeHtml(rule.rule_text)}</span>
+        <div class="rule-item-badges">${zoneBadge}${warningBadge}</div>
+      </div>
+      <div class="rule-item-actions">
+        <input type="checkbox" ${rule.enabled ? 'checked' : ''} title="Enabled"
+          onchange="toggleActiveRule(${JSON.stringify(rule.id)}, this.checked)" />
+        <button class="rule-item-delete" title="Delete rule"
+          onclick="deleteActiveRule(${JSON.stringify(rule.id)})">✕</button>
+      </div>
+    `;
+    activeRulesListEl.appendChild(item);
+  });
+}
+
+function addActiveRule() {
+  const text = liveRuleInputEl.value.trim();
+  if (!text) { liveRuleInputEl.focus(); return; }
+  const zoneName = ruleZoneSelectEl ? ruleZoneSelectEl.value : '';
+
+  fetch('/rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rule_text: text, zone_name: zoneName || null }),
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return;
+      liveRuleInputEl.value = '';
+      if (ruleZoneSelectEl) ruleZoneSelectEl.value = '';
+      loadActiveRules();
+      if (openLibrary === 'live') renderRuleLibrary('live');
+    });
+}
+
+function addExampleRule(ruleText) {
+  fetch('/rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rule_text: ruleText, zone_name: null }),
+  })
+    .then(r => r.json())
+    .then(d => { if (d.ok) loadActiveRules(); });
+}
+
+function toggleActiveRule(id, enabled) {
+  fetch(`/rules/${encodeURIComponent(id)}/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  }).then(() => loadActiveRules());
+}
+
+function deleteActiveRule(id) {
+  fetch(`/rules/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    .then(() => loadActiveRules());
 }
 
 // ── monitoring ────────────────────────────────────────────────────────────────
@@ -712,8 +856,14 @@ let knownIds     = new Set();
 let pollInterval = null;
 
 function startMonitoring() {
-  const rule = document.getElementById('ruleInput').value.trim();
-  if (!rule) { document.getElementById('ruleInput').focus(); return; }
+  const typed = document.getElementById('ruleInput').value.trim();
+  if (activeRules.length === 0 && !typed) {
+    document.getElementById('ruleInput').focus();
+    return;
+  }
+  // if there's an active rules list, /start's rule text is just a placeholder —
+  // the detector pulls the real rules from the shared list every cycle
+  const rule = typed || 'active rules list';
   fetch('/start', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rule }),
@@ -727,7 +877,6 @@ function stopMonitoring() {
 function setMonitoringUI(active) {
   document.getElementById('startBtn').disabled  = active;
   document.getElementById('stopBtn').disabled   = !active;
-  document.getElementById('ruleInput').readOnly = active;
   const dot   = document.getElementById('statusDot');
   const label = document.getElementById('statusLabel');
   const badge = document.getElementById('statusBadge');
@@ -789,12 +938,12 @@ function escapeHtml(str) {
 }
 
 // ── mode switch (Live Camera vs Demo Video) ─────────────────────────────────
-// Live camera mode is untouched — startMonitoring/stopMonitoring/pollAlerts
-// above still drive it exactly as before. Demo mode uses the 4-stage flow below.
+// The rule management panel is shared and always visible in both modes.
+// Only the action area below it (Start/Stop vs. video source + run) switches.
 function onFeedModeChange() {
   const demo = modeDemo.checked;
-  liveRuleCard.style.display = demo ? 'none' : '';
-  demoPanelEl.style.display  = demo ? '' : 'none';
+  liveActionsEl.style.display = demo ? 'none' : '';
+  demoPanelEl.style.display   = demo ? '' : 'none';
 
   if (demo) {
     feedImg.src = '';
@@ -808,30 +957,29 @@ function onFeedModeChange() {
 modeLive.addEventListener('change', onFeedModeChange);
 modeDemo.addEventListener('change', onFeedModeChange);
 
-// ── demo mode: 4-stage flow ─────────────────────────────────────────────────
-let demoVideoReady   = false;  // a video (sample or uploaded) is loaded server-side
+// ── demo mode: shared rules list drives everything ──────────────────────────
 let demoPollInterval = null;
 
+// called from loadActiveRules() so the source buttons always reflect the
+// current shared rules list, regardless of which mode is on screen
 function updateDemoSourceButtons() {
-  const hasRule = demoRuleInput.value.trim().length > 0;
-  useSampleBtn.disabled = !hasRule;
-  uploadVideoBtn.disabled = !hasRule;
-  rerunSameBtn.style.display = (demoVideoReady && hasRule) ? '' : 'none';
+  const hasEnabled = activeRules.some(r => r.enabled);
+  useSampleBtn.disabled = !hasEnabled;
+  uploadVideoBtn.disabled = !hasEnabled;
+  demoSourceHintEl.textContent = hasEnabled ? '' : 'Add at least one rule before selecting a video.';
 }
-demoRuleInput.addEventListener('input', updateDemoSourceButtons);
 
 function useSampleVideo() {
   if (useSampleBtn.disabled) return;
-  demoSetupHint.textContent = 'Loading sample video…';
+  demoSourceHintEl.textContent = 'Loading sample video…';
   fetch('/demo_run/load_sample', { method: 'POST' })
     .then(r => r.json())
     .then(d => {
-      if (!d.ok) { demoSetupHint.textContent = d.error || 'Failed to load sample video'; return; }
-      demoVideoReady = true;
-      demoSetupHint.textContent = '';
+      if (!d.ok) { demoSourceHintEl.textContent = d.error || 'Failed to load sample video'; return; }
+      demoSourceHintEl.textContent = '';
       startDemoRun();
     })
-    .catch(() => { demoSetupHint.textContent = 'Failed to load sample video'; });
+    .catch(() => { demoSourceHintEl.textContent = 'Failed to load sample video'; });
 }
 
 function triggerDemoUpload() {
@@ -844,30 +992,23 @@ function onDemoVideoChosen() {
   if (!file) return;
   const form = new FormData();
   form.append('video', file);
-  demoSetupHint.textContent = 'Uploading…';
+  demoSourceHintEl.textContent = 'Uploading…';
   fetch('/upload_video', { method: 'POST', body: form })
     .then(r => r.json())
     .then(d => {
-      if (!d.ok) { demoSetupHint.textContent = d.error || 'Upload failed'; return; }
-      demoVideoReady = true;
-      demoSetupHint.textContent = '';
+      if (!d.ok) { demoSourceHintEl.textContent = d.error || 'Upload failed'; return; }
+      demoSourceHintEl.textContent = '';
       startDemoRun();
     })
-    .catch(() => { demoSetupHint.textContent = 'Upload failed'; });
+    .catch(() => { demoSourceHintEl.textContent = 'Upload failed'; });
 }
 
 function startDemoRun() {
-  const rule = demoRuleInput.value.trim();
-  if (!rule) return;
-  demoSetupHint.textContent = '';
-  fetch('/demo_run/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rule }),
-  })
+  demoSourceHintEl.textContent = '';
+  fetch('/demo_run/start', { method: 'POST' })
     .then(r => r.json())
     .then(d => {
-      if (!d.ok) { demoSetupHint.textContent = d.error || 'Failed to start run'; return; }
+      if (!d.ok) { demoSourceHintEl.textContent = d.error || 'Failed to start run'; showDemoStage('source'); return; }
       cameraOverlayEl.style.display = 'none';
       resetAlertsUI();
       showDemoStage('run');
@@ -876,21 +1017,26 @@ function startDemoRun() {
       demoPollInterval = setInterval(pollDemoRun, 700);
       pollDemoRun();
     })
-    .catch(() => { demoSetupHint.textContent = 'Failed to start run'; });
+    .catch(() => { demoSourceHintEl.textContent = 'Failed to start run'; });
 }
 
 function pollDemoRun() {
   fetch('/demo_run/status').then(r => r.json()).then(d => {
     if (!d.active) return;
-    demoProgressEl.textContent = `Analysing frame ${d.current_index} of ${d.total}`;
+    const ruleSuffix = d.current_rule_label ? ` — Rule: ${d.current_rule_label}` : '';
+    demoProgressEl.textContent = `Analysing frame ${d.current_index} of ${d.total}${ruleSuffix}`;
     feedImg.src = `/demo_run/frame?ts=${Date.now()}`;
     renderAlerts(d.alerts);
 
     if (d.done) {
       clearInterval(demoPollInterval);
       demoPollInterval = null;
-      const count = d.alerts.length;
-      demoSummaryEl.textContent = `Analysed ${d.total} frame${d.total === 1 ? '' : 's'} — ${count} alert${count === 1 ? '' : 's'} triggered`;
+      const alertCount = d.alerts.length;
+      const ruleCount = new Set(d.alerts.map(a => a.rule)).size;
+      demoSummaryEl.textContent =
+        `Analysed ${d.total} frame${d.total === 1 ? '' : 's'} — ` +
+        `${alertCount} alert${alertCount === 1 ? '' : 's'} triggered across ` +
+        `${ruleCount} rule${ruleCount === 1 ? '' : 's'}.`;
       showDemoStage('results');
     }
   }).catch(() => {});
@@ -899,30 +1045,22 @@ function pollDemoRun() {
 function cancelDemoRun() {
   fetch('/demo_run/cancel', { method: 'POST' }).then(() => {
     if (demoPollInterval) { clearInterval(demoPollInterval); demoPollInterval = null; }
-    showDemoStage('setup');
+    showDemoStage('source');
   });
 }
 
-function tryAnotherRule() {
-  demoRuleInput.value = '';
-  updateDemoSourceButtons();
-  showDemoStage('setup');
+function runAgainSameRules() {
+  startDemoRun();
 }
 
-function newVideo() {
-  demoVideoReady = false;
-  demoRuleInput.value = '';
-  demoVideoInput.value = '';
-  updateDemoSourceButtons();
-  cameraOverlayEl.style.display = 'flex';
-  cameraOverlayEl.querySelector('span').textContent = 'Load a video to begin';
-  showDemoStage('setup');
+function changeRules() {
+  showDemoStage('source');
 }
 
 function showDemoStage(stage) {
-  demoSetupEl.style.display   = stage === 'setup'   ? '' : 'none';
-  demoRunEl.style.display     = stage === 'run'      ? '' : 'none';
-  demoResultsEl.style.display = stage === 'results'  ? '' : 'none';
+  demoSourceStageEl.style.display  = stage === 'source'  ? '' : 'none';
+  demoRunStageEl.style.display     = stage === 'run'     ? '' : 'none';
+  demoResultsStageEl.style.display = stage === 'results' ? '' : 'none';
 }
 
 function resetAlertsUI() {
@@ -973,18 +1111,13 @@ const RULE_LIBRARY = [
 
 const liveRuleInputEl = document.getElementById('ruleInput');
 
+// only one target now — the rule panel (and its library) is shared by both modes
 const libraryTargets = {
   live: {
     input: () => liveRuleInputEl,
     panel: () => document.getElementById('liveLibraryPanel'),
     btn:   () => document.getElementById('liveLibraryBtn'),
     onFill: () => {},
-  },
-  demo: {
-    input: () => demoRuleInput,
-    panel: () => document.getElementById('demoLibraryPanel'),
-    btn:   () => document.getElementById('demoLibraryBtn'),
-    onFill: () => updateDemoSourceButtons(),
   },
 };
 
@@ -1067,8 +1200,8 @@ document.addEventListener('click', (e) => {
 
 // keep checkmarks in sync if the user edits the rule text manually
 liveRuleInputEl.addEventListener('input', () => { if (openLibrary === 'live') renderRuleLibrary('live'); });
-demoRuleInput.addEventListener('input', () => { if (openLibrary === 'demo') renderRuleLibrary('demo'); });
 
 // ── init ──────────────────────────────────────────────────────────────────────
 loadZones();
+loadActiveRules();
 startPolling();

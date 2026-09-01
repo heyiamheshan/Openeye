@@ -15,6 +15,7 @@ CAMERA_WARMUP_FRAMES = int(os.environ.get("CAMERA_WARMUP_FRAMES", "5"))
 ALERTS_DIR = os.environ.get("ALERTS_DIR", "alerts")
 
 MOTION_THRESHOLD = float(os.environ.get("MOTION_THRESHOLD", "8.0"))
+MAX_PARALLEL_RULES = int(os.environ.get("MAX_PARALLEL_RULES", "4"))
 
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").strip().lower() == "true"
 DEMO_VIDEO_PATH = os.environ.get("DEMO_VIDEO_PATH", "")
