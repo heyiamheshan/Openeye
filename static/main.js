@@ -17,6 +17,12 @@ const hintEl   = document.getElementById('drawHint');
 const promptEl = document.getElementById('zoneNamePrompt');
 const nameInput = document.getElementById('zoneNameInput');
 
+const modeLive        = document.getElementById('modeLive');
+const modeDemo        = document.getElementById('modeDemo');
+const demoUploadEl    = document.getElementById('demoUpload');
+const demoVideoInput  = document.getElementById('demoVideoInput');
+const demoUploadHint  = document.getElementById('demoUploadHint');
+
 // ── constants ─────────────────────────────────────────────────────────────────
 const AMBER_FILL        = 'rgba(245,158,11,0.22)';
 const AMBER_FILL_MOVE   = 'rgba(245,158,11,0.32)';  // slightly brighter while moving
@@ -769,6 +775,45 @@ function escapeHtml(str) {
   const d = document.createElement('div'); d.textContent = str; return d.innerHTML;
 }
 
+// ── demo mode ─────────────────────────────────────────────────────────────────
+function onFeedModeChange() {
+  const demo = modeDemo.checked;
+  demoUploadEl.classList.toggle('visible', demo);
+  fetch('/demo_mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ demo_mode: demo }),
+  }).catch(() => {});
+}
+
+modeLive.addEventListener('change', onFeedModeChange);
+modeDemo.addEventListener('change', onFeedModeChange);
+
+function uploadDemoVideo() {
+  const file = demoVideoInput.files[0];
+  if (!file) { demoUploadHint.textContent = 'Choose a file first'; return; }
+
+  const form = new FormData();
+  form.append('video', file);
+  demoUploadHint.textContent = 'Uploading…';
+
+  fetch('/upload_video', { method: 'POST', body: form })
+    .then(r => r.json())
+    .then(d => {
+      demoUploadHint.textContent = d.ok ? 'Uploaded ✓' : (d.error || 'Upload failed');
+    })
+    .catch(() => { demoUploadHint.textContent = 'Upload failed'; });
+}
+
+function loadDemoState() {
+  fetch('/demo_mode').then(r => r.json()).then(d => {
+    modeLive.checked = !d.demo_mode;
+    modeDemo.checked = d.demo_mode;
+    demoUploadEl.classList.toggle('visible', d.demo_mode);
+  }).catch(() => {});
+}
+
 // ── init ──────────────────────────────────────────────────────────────────────
 loadZones();
+loadDemoState();
 startPolling();

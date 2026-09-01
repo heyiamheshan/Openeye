@@ -17,6 +17,22 @@
     </div>
   </header>
 
+  <div class="source-toolbar">
+    <label class="mode-option">
+      <input type="radio" name="feedMode" id="modeLive" value="live" checked />
+      Live Camera
+    </label>
+    <label class="mode-option">
+      <input type="radio" name="feedMode" id="modeDemo" value="demo" />
+      Demo Video
+    </label>
+    <div class="demo-upload" id="demoUpload">
+      <input type="file" id="demoVideoInput" accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo" />
+      <button class="btn-sm" onclick="uploadDemoVideo()">Upload</button>
+      <span class="toolbar-hint" id="demoUploadHint"></span>
+    </div>
+  </div>
+
   <main class="layout">
     <!-- ── left: camera feed ── -->
     <section class="panel-camera">
