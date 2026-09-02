@@ -1,5 +1,6 @@
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -28,6 +29,7 @@ _detector_lock = threading.Lock()
 
 _demo_run_thread: DemoRunThread | None = None
 _demo_run_lock = threading.Lock()
+_demo_run_started_at: str | None = None  # ISO timestamp — used to scope the digest to "this run"
 
 _camera_lock = threading.Lock()
 _camera: cv2.VideoCapture | None = None
@@ -115,6 +117,30 @@ def current_frame():
     return Response(buf.tobytes(), mimetype="image/jpeg")
 
 
+@app.route("/demo_run/current_frame")
+def demo_run_current_frame():
+    """A real frame straight from the loaded demo video, independent of the
+    live/demo runtime_state flag — used so zones can be drawn against an
+    actual demo-video frame instead of the live webcam or a placeholder."""
+    path = runtime_state.get_video_path()
+    if not path:
+        return jsonify(error="No demo video loaded"), 404
+    cap = _get_demo_camera()
+    if cap is None or not cap.isOpened():
+        return jsonify(error="Cannot open demo video"), 503
+    with _demo_lock:
+        ok, frame = cap.read()
+        if not ok:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = cap.read()
+    if not ok:
+        return jsonify(error="Failed to read frame from demo video"), 503
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+        return jsonify(error="Failed to encode frame"), 503
+    return Response(buf.tobytes(), mimetype="image/jpeg")
+
+
 @app.route("/demo_mode", methods=["GET", "POST"])
 def demo_mode_route():
     if request.method == "POST":
@@ -152,17 +178,27 @@ def load_sample_video():
 
 @app.route("/demo_run/start", methods=["POST"])
 def demo_run_start():
-    global _demo_run_thread
+    global _demo_run_thread, _demo_run_started_at
+    all_rules = rules_store.get_rules()
+    print(f"[demo_run_start] all rules in rules_store ({len(all_rules)}):")
+    for r in all_rules:
+        print(
+            f"  id={r.get('id')} text={r.get('rule_text')!r} enabled={r.get('enabled')} "
+            f"rule_type={r.get('rule_type')} zone_name={r.get('zone_name')!r}"
+        )
     enabled_rules = rules_store.get_enabled_rules()
+    print(f"[demo_run_start] enabled_rules passed to DemoRunThread ({len(enabled_rules)}): {enabled_rules}")
     if not enabled_rules:
         return jsonify(error="Add at least one rule before selecting a video."), 400
     video_path = runtime_state.get_video_path()
+    print(f"[demo_run_start] video_path={video_path!r}")
     if not video_path or not Path(video_path).exists():
         return jsonify(error="No video loaded"), 400
 
     with _demo_run_lock:
         if _demo_run_thread is not None and _demo_run_thread.is_alive() and not _demo_run_thread.done:
             return jsonify(error="A demo run is already in progress"), 409
+        _demo_run_started_at = datetime.now().isoformat(timespec="seconds")
         _demo_run_thread = DemoRunThread(enabled_rules, video_path)
         _demo_run_thread.start()
 
@@ -331,37 +367,59 @@ def get_incidents_route():
 
 @app.route("/digest/stats")
 def digest_stats():
-    records = incident_log.get_recent(24)
+    since = request.args.get("since")
+    records = incident_log.get_incidents(since=since) if since else incident_log.get_recent(24)
     return jsonify(ok=True, stats=incident_log.compute_stats(records))
 
 
 DIGEST_PROMPT_TEMPLATE = (
     "You are a factory safety analyst. Below is a log of monitoring incidents from "
-    "the last 24 hours. Write a concise shift safety digest with exactly these "
+    "{period}. Write a concise shift safety digest with exactly these "
     "sections: 1) Summary — one sentence with the total count and overall "
     "assessment. 2) Patterns — any clustering by zone, by time of day, or by rule "
     "type, stated plainly. 3) Highest concern — the single most serious incident "
     "and why. 4) Recommended action — two or three specific, practical actions a "
     "supervisor could take tomorrow. Keep the whole digest under 200 words. Be "
-    "factual and do not speculate beyond what the log shows. Log follows: {log_text}"
+    "factual and do not speculate beyond what the log shows. Log follows: {log_text}\n\n"
+    "Strict rules for your response: Do not invent or cite any standard, SOP, "
+    "regulation, policy number, or section reference — none are available to you. "
+    "Do not invent specific measurements, distances, or thresholds. Base every "
+    "statement only on what appears in the log. Match the tone to the actual "
+    "severity: if the incidents are minor or ambiguous, say so plainly rather than "
+    "escalating the language. Recommended actions must be general and practical, "
+    "phrased as things a supervisor could reasonably do, not as compliance "
+    "requirements. If there is only one incident, do not describe patterns — state "
+    "that there is insufficient data to identify a pattern."
 )
 
 
 @app.route("/digest/generate", methods=["POST"])
 def digest_generate():
-    records = incident_log.get_recent(24)
+    data = request.get_json(silent=True) or {}
+    scope = data.get("scope") or "24h"
+    if scope not in ("24h", "demo_run"):
+        return jsonify(error="Invalid scope"), 400
+
+    if scope == "demo_run":
+        if not _demo_run_started_at:
+            return jsonify(ok=True, message="No demo run has been started yet.", digest=None, stats=incident_log.compute_stats([]))
+        records = incident_log.get_incidents(since=_demo_run_started_at)
+        period = "the current demo run"
+    else:
+        records = incident_log.get_recent(24)
+        period = "the last 24 hours"
+
     stats = incident_log.compute_stats(records)
 
     if not records:
-        return jsonify(
-            ok=True,
-            message="No incidents recorded in the last 24 hours.",
-            digest=None,
-            stats=stats,
+        no_incidents_message = (
+            "No incidents recorded in the current demo run." if scope == "demo_run"
+            else "No incidents recorded in the last 24 hours."
         )
+        return jsonify(ok=True, message=no_incidents_message, digest=None, stats=stats)
 
     log_text = incident_log.build_digest_log_text(records)
-    prompt = DIGEST_PROMPT_TEMPLATE.format(log_text=log_text)
+    prompt = DIGEST_PROMPT_TEMPLATE.format(log_text=log_text, period=period)
 
     payload = {
         "model": config.TEXT_MODEL,

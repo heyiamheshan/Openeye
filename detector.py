@@ -64,23 +64,23 @@ def _fetch_demo_frame(path: str) -> bytes:
     return buf.tobytes()
 
 
-def _normalize_bbox(bbox: list, b64_image: str) -> list | None:
+def _normalize_bbox(bbox: list) -> list | None:
     """The model is asked for normalised 0-1 bbox coords but sometimes returns
-    pixel coordinates instead. Detect that and rescale using the actual decoded
-    image dimensions, so the zone polygon check (also normalised 0-1) is valid."""
+    values on Qwen-VL's own bbox grounding convention instead: a fixed 0-1000
+    scale, independent of the actual served image's pixel dimensions. Confirmed
+    directly against raw API output (e.g. a 355x324 crop returning bbox
+    [247, 312, 500, 996] — 500 and 996 both exceed the crop's own width/height,
+    so these cannot be pixel coordinates; dividing by 1000 gives the correct
+    [0.247, 0.312, 0.5, 0.996]). Rescaling by the image's actual pixel
+    dimensions instead (the previous approach) silently produced coordinates
+    that could exceed 1.0 — most visibly on small zone crops, where it broke
+    zone-suppression by placing every bbox centre outside the zone."""
     if not bbox or len(bbox) != 4:
         return bbox
     x1, y1, x2, y2 = bbox
     if max(x1, y1, x2, y2) <= 1.5:
         return bbox  # already normalised (small overshoot tolerance)
-    try:
-        img = Image.open(BytesIO(base64.b64decode(b64_image)))
-        w, h = img.size
-        if w == 0 or h == 0:
-            return None
-        return [x1 / w, y1 / h, x2 / w, y2 / h]
-    except Exception:
-        return None  # can't verify — treat as unavailable, not as "outside"
+    return [x1 / 1000, y1 / 1000, x2 / 1000, y2 / 1000]
 
 
 def point_in_polygon(point: tuple, polygon: list) -> bool:
@@ -335,8 +335,8 @@ def analyze_frame(
         return box
 
     if rule_type == "proximity":
-        subject_bbox = _map_back(_normalize_bbox(result.get("subject_bbox"), b64_image))
-        hazard_bbox = _map_back(_normalize_bbox(result.get("hazard_bbox"), b64_image))
+        subject_bbox = _map_back(_normalize_bbox(result.get("subject_bbox")))
+        hazard_bbox = _map_back(_normalize_bbox(result.get("hazard_bbox")))
 
         if triggered and subject_bbox and hazard_bbox and len(subject_bbox) == 4 and len(hazard_bbox) == 4:
             sx = (subject_bbox[0] + subject_bbox[2]) / 2
@@ -361,7 +361,7 @@ def analyze_frame(
         result["subject_bbox"] = subject_bbox
         result["hazard_bbox"] = hazard_bbox
     else:
-        bbox = _map_back(_normalize_bbox(result.get("bbox"), b64_image))
+        bbox = _map_back(_normalize_bbox(result.get("bbox")))
 
         if not triggered:
             print(f"Rule '{rule_text}' — not triggered — skipped")

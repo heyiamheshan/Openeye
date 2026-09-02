@@ -189,7 +189,7 @@
       <!-- shift digest card -->
       <div class="card digest-card" id="digestCard">
         <button type="button" class="digest-header" id="digestHeader">
-          <h2 class="card-title">Shift Digest</h2>
+          <h2 class="card-title" id="digestTitle">Shift Digest</h2>
           <span class="digest-summary-line" id="digestSummaryLine">Loading…</span>
           <span class="digest-chevron" id="digestChevron">▾</span>
         </button>
@@ -200,6 +200,9 @@
           <button type="button" class="btn-rose btn-full" id="generateDigestBtn">Generate AI digest</button>
 
           <div class="digest-result" id="digestResult" hidden></div>
+          <p class="digest-disclaimer" id="digestDisclaimer" hidden>
+            AI-generated summary based on logged incidents. Review before acting.
+          </p>
 
           <button type="button" class="btn-ghost btn-full" id="downloadDigestBtn" hidden>Download report</button>
         </div>

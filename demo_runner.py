@@ -100,6 +100,13 @@ class DemoRunThread(threading.Thread):
                     self.current_index = i
                     self._current_rule_label = rule_label
 
+                print(f"[demo frame {i}/{len(indices)}] evaluating {len(self.rules)} rule(s):")
+                for r in self.rules:
+                    print(
+                        f"    rule={r['rule_text']!r} zone={r.get('zone_name')!r} "
+                        f"rule_type={r.get('rule_type', 'standard')}"
+                    )
+
                 max_workers = min(len(self.rules), config.MAX_PARALLEL_RULES)
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
@@ -115,8 +122,16 @@ class DemoRunThread(threading.Thread):
                         try:
                             result = future.result()
                         except Exception as exc:
-                            print(f"rule '{rule_entry['rule_text']}' ERROR: {exc}")
+                            print(f"[demo frame {i}] rule '{rule_entry['rule_text']}' ERROR: {exc}")
                             continue
+
+                        print(
+                            f"[demo frame {i}] rule={rule_entry['rule_text']!r} "
+                            f"zone={rule_entry.get('zone_name')!r} "
+                            f"triggered={result.get('triggered')} "
+                            f"confidence={result.get('confidence')} "
+                            f"explanation={result.get('explanation')!r}"
+                        )
 
                         if result.get("triggered", False):
                             ts = datetime.now()

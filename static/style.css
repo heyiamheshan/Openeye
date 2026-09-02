@@ -429,6 +429,18 @@ button {
   border-color: var(--text);
 }
 
+.demo-src-rose {
+  color: var(--rose);
+  border-color: var(--rose-300);
+  background: var(--rose-50);
+}
+
+.demo-src-rose:hover {
+  color: #FFFFFF;
+  background: var(--rose);
+  border-color: var(--rose);
+}
+
 .demo-progress {
   height: 2px;
   background: var(--border);
@@ -1224,6 +1236,13 @@ button {
 }
 
 .digest-result strong { color: var(--rose-dark); }
+
+.digest-disclaimer {
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.4;
+}
 
 /* ── alert image lightbox ──────────────────────────────────────────────────── */
 .lightbox-backdrop {

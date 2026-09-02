@@ -65,6 +65,7 @@ let resizeCenterPx    = null;  // circle: fixed centre in pixel space during res
 
 // demo state
 let demoStreamStarted = false;
+let demoVideoLoaded   = false;  // true once a sample/upload video has been selected
 
 // ── canvas sizing ─────────────────────────────────────────────────────────────
 function syncCanvasSize() {
@@ -114,8 +115,21 @@ function freezeFeed() {
   const r = canvas.getBoundingClientRect();
   canvas.width  = r.width;
   canvas.height = r.height;
-  const media = activeMediaEl();
 
+  if (feedMode === 'demo') {
+    // the demoVideo element only shows real content once frames start
+    // streaming through captureStream() during an active run — before/between
+    // runs it's just a placeholder, so client-side canvas capture would freeze
+    // on the wrong image. Always fetch a real frame straight from the loaded
+    // demo video instead.
+    demoVideo.pause();
+    frozenFrameEl.src = `/demo_run/current_frame?ts=${Date.now()}`;
+    frozenFrameEl.hidden = false;
+    frameEl.classList.add('freeze');
+    return;
+  }
+
+  const media = activeMediaEl();
   let captured = false;
   try {
     const tmp = document.createElement('canvas');
@@ -135,12 +149,8 @@ function freezeFeed() {
   }
   frozenFrameEl.hidden = false;
 
-  if (feedMode === 'demo') {
-    demoVideo.pause();
-  } else {
-    feedImg.dataset.liveSrc = feedImg.src;
-    feedImg.src = '';
-  }
+  feedImg.dataset.liveSrc = feedImg.src;
+  feedImg.src = '';
   frameEl.classList.add('freeze');
 }
 
@@ -195,6 +205,7 @@ function setFeedMode(mode) {
       showCameraOverlay();
     }
   }
+  if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
 }
 
 document.querySelectorAll('#feedModeToggle .mode-btn').forEach(btn => {
@@ -258,6 +269,20 @@ function renderDemoSources() {
     wrap.appendChild(cancelBtn);
   }
 
+  if (!demoActive && demoRunCompleted) {
+    const reportBtn = document.createElement('button');
+    reportBtn.type = 'button';
+    reportBtn.className = 'demo-src demo-src-rose';
+    reportBtn.textContent = 'Generate analysis report';
+    reportBtn.addEventListener('click', () => {
+      digestBodyEl.hidden = false;
+      digestChevronEl.textContent = '▴';
+      digestCardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      generateDigest();
+    });
+    wrap.appendChild(reportBtn);
+  }
+
   if (!hasEnabledRule && !demoActive) {
     setDemoStatus('Add at least one enabled rule before selecting a video.');
   }
@@ -270,6 +295,7 @@ function useSampleVideo() {
     .then(r => r.json())
     .then(d => {
       if (!d.ok) { setDemoStatus(d.error || 'Failed to load sample video'); return; }
+      demoVideoLoaded = true;
       startDemoRun();
     })
     .catch(() => setDemoStatus('Failed to load sample video'));
@@ -287,6 +313,7 @@ document.getElementById('demoVideoInput').addEventListener('change', () => {
     .then(d => {
       input.value = '';
       if (!d.ok) { setDemoStatus(d.error || 'Upload failed'); return; }
+      demoVideoLoaded = true;
       startDemoRun();
     })
     .catch(() => setDemoStatus('Upload failed'));
@@ -302,6 +329,9 @@ function startDemoRun() {
     .then(d => {
       if (!d.ok) { setDemoStatus(d.error || 'Failed to start analysis'); return; }
       demoActive = true;
+      demoRunCompleted = false;
+      demoRunStartedAt = new Date().toISOString();
+      if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
       renderDemoSources();
       document.getElementById('demoProgress').style.width = '0%';
       setDemoStatus('Starting…');
@@ -326,7 +356,9 @@ function pollDemoRun() {
       clearInterval(demoPollInterval);
       demoPollInterval = null;
       demoActive = false;
+      demoRunCompleted = true;
       renderDemoSources();
+      if (typeof loadDigestStats === 'function') loadDigestStats();
       const alertCount = (d.alerts || []).length;
       const ruleCount = new Set((d.alerts || []).map(a => a.rule)).size;
       setDemoStatus(
@@ -353,7 +385,12 @@ function cancelDemoRun() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 function toggleDrawMode() {
-  if (phase !== 'idle') { cancelDraw(); } else { enterDraw(); }
+  if (phase !== 'idle') { cancelDraw(); return; }
+  if (feedMode === 'demo' && !demoVideoLoaded) {
+    setDemoStatus('Select a video below before drawing a zone.');
+    return;
+  }
+  enterDraw();
 }
 
 const DRAW_HINTS = {
@@ -1484,6 +1521,8 @@ document.addEventListener('keydown', (e) => {
 // and expanded stat list, /digest/generate for the on-demand AI text digest.
 // ═════════════════════════════════════════════════════════════════════════════
 
+const digestCardEl        = document.getElementById('digestCard');
+const digestTitleEl       = document.getElementById('digestTitle');
 const digestHeaderEl      = document.getElementById('digestHeader');
 const digestBodyEl        = document.getElementById('digestBody');
 const digestChevronEl     = document.getElementById('digestChevron');
@@ -1491,20 +1530,45 @@ const digestSummaryLineEl = document.getElementById('digestSummaryLine');
 const digestStatsEl       = document.getElementById('digestStats');
 const generateDigestBtn   = document.getElementById('generateDigestBtn');
 const digestResultEl      = document.getElementById('digestResult');
+const digestDisclaimerEl  = document.getElementById('digestDisclaimer');
 const downloadDigestBtn   = document.getElementById('downloadDigestBtn');
 
 let latestDigestStats = null;
 let latestDigestText  = null;
+let demoRunCompleted  = false;   // true once a demo run has finished at least once
+let demoRunStartedAt  = null;    // client-side timestamp, used only for the stats preview
 
 const SEVERITY_DOT_CLASS = { high: 'severity-dot-high', medium: 'severity-dot-medium', low: 'severity-dot-low' };
 const SEVERITY_LABEL     = { high: 'High', medium: 'Medium', low: 'Low' };
 
+// live mode: "Shift Digest" / last 24h.  demo mode: "Analysis Report" / this run only.
+function digestScopeIsDemo() {
+  return feedMode === 'demo';
+}
+
+function digestPeriodLabel() {
+  return digestScopeIsDemo() ? 'in this demo run' : 'in the last 24 hours';
+}
+
+function updateDigestModeUI() {
+  digestTitleEl.textContent = digestScopeIsDemo() ? 'Analysis Report' : 'Shift Digest';
+  loadDigestStats();
+}
+
 function loadDigestStats() {
-  fetch('/digest/stats').then(r => r.json()).then(d => {
+  const isDemo = digestScopeIsDemo();
+  if (isDemo && !demoRunStartedAt) {
+    latestDigestStats = null;
+    digestSummaryLineEl.textContent = 'Run a demo analysis to see incidents here';
+    if (!digestBodyEl.hidden) renderDigestStats(null);
+    return;
+  }
+  const url = isDemo ? `/digest/stats?since=${encodeURIComponent(demoRunStartedAt)}` : '/digest/stats';
+  fetch(url).then(r => r.json()).then(d => {
     if (!d.ok) return;
     latestDigestStats = d.stats;
     const total = d.stats.total || 0;
-    digestSummaryLineEl.textContent = `${total} incident${total === 1 ? '' : 's'} in the last 24 hours`;
+    digestSummaryLineEl.textContent = `${total} incident${total === 1 ? '' : 's'} ${digestPeriodLabel()}`;
     if (!digestBodyEl.hidden) renderDigestStats(latestDigestStats);
   }).catch(() => {
     digestSummaryLineEl.textContent = 'Stats unavailable';
@@ -1516,7 +1580,7 @@ function renderDigestStats(stats) {
   if (!stats || stats.total === 0) {
     const p = document.createElement('p');
     p.className = 'digest-empty';
-    p.textContent = 'No incidents logged in the last 24 hours.';
+    p.textContent = `No incidents logged ${digestPeriodLabel()}.`;
     digestStatsEl.appendChild(p);
     return;
   }
@@ -1592,12 +1656,19 @@ function renderDigestText(text) {
   digestResultEl.innerHTML = withHeaders.replace(/\n/g, '<br>');
 }
 
-generateDigestBtn.addEventListener('click', () => {
+function generateDigest() {
+  const scope = digestScopeIsDemo() ? 'demo_run' : '24h';
+
   generateDigestBtn.disabled = true;
   generateDigestBtn.textContent = 'Generating…';
   digestResultEl.hidden = true;
+  digestDisclaimerEl.hidden = true;
 
-  fetch('/digest/generate', { method: 'POST' })
+  fetch('/digest/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope }),
+  })
     .then(r => r.json())
     .then(d => {
       generateDigestBtn.disabled = false;
@@ -1627,6 +1698,7 @@ generateDigestBtn.addEventListener('click', () => {
       latestDigestText = d.digest;
       digestResultEl.hidden = false;
       renderDigestText(d.digest);
+      digestDisclaimerEl.hidden = false;
       downloadDigestBtn.hidden = false;
     })
     .catch(() => {
@@ -1635,7 +1707,9 @@ generateDigestBtn.addEventListener('click', () => {
       digestResultEl.hidden = false;
       digestResultEl.textContent = 'Failed to generate digest.';
     });
-});
+}
+
+generateDigestBtn.addEventListener('click', generateDigest);
 
 function digestReportFilename() {
   const d = new Date();
@@ -1647,12 +1721,14 @@ downloadDigestBtn.addEventListener('click', () => {
   if (!latestDigestText) return;
   const stats = latestDigestStats || {};
   const lines = [
-    'OpenEye Shift Digest',
+    digestScopeIsDemo() ? 'OpenEye Analysis Report' : 'OpenEye Shift Digest',
     new Date().toString(),
     '',
     latestDigestText,
     '',
-    '--- Statistics (last 24 hours) ---',
+    'AI-generated summary based on logged incidents. Review before acting.',
+    '',
+    `--- Statistics (${digestPeriodLabel()}) ---`,
     `Total incidents: ${stats.total || 0}`,
     '',
     'By zone:',
