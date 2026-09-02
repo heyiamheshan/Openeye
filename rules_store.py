@@ -31,7 +31,14 @@ def get_enabled_rules() -> list:
         return [r for r in _load() if r.get("enabled", True)]
 
 
-def add_rule(rule_text: str, zone_name: str | None = None) -> dict:
+def add_rule(
+    rule_text: str,
+    zone_name: str | None = None,
+    rule_type: str = "standard",
+    required_ppe: list | None = None,
+    subject: str | None = None,
+    hazard: str | None = None,
+) -> dict:
     with _lock:
         rules = _load()
         rule = {
@@ -40,7 +47,13 @@ def add_rule(rule_text: str, zone_name: str | None = None) -> dict:
             "zone_name": zone_name,
             "enabled": True,
             "zone_name_cleared": False,
+            "rule_type": rule_type,
         }
+        if rule_type == "ppe_check":
+            rule["required_ppe"] = required_ppe or []
+        if rule_type == "proximity":
+            rule["subject"] = subject or ""
+            rule["hazard"] = hazard or ""
         rules.append(rule)
         _save(rules)
         return rule

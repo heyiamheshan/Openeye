@@ -17,6 +17,7 @@ import urllib3
 from PIL import Image, ImageDraw
 
 import config
+import incident_log
 import rules_store
 import runtime_state
 import zones_store
@@ -156,19 +157,87 @@ def _crop_to_zone(img: Image.Image, zone_points: list):
     return cropped, crop_rect_norm
 
 
-def _draw_zone_overlay(raw_bytes: bytes, zone_points: list) -> bytes:
-    """Draws the zone polygon onto the FULL frame for the saved evidence image."""
+def _draw_zone_overlay(
+    raw_bytes: bytes,
+    zone_points: list | None,
+    subject_bbox: list | None = None,
+    hazard_bbox: list | None = None,
+) -> bytes:
+    """Draws the zone polygon (if any) and, for proximity alerts, both bounding
+    boxes plus a line connecting their centres, onto the FULL frame for the
+    saved evidence image."""
     img = Image.open(BytesIO(raw_bytes)).convert("RGB")
     w, h = img.size
     draw = ImageDraw.Draw(img)
-    pts = [(p[0] * w, p[1] * h) for p in zone_points]
-    draw.line(pts + [pts[0]], fill=(245, 158, 11), width=4)
+
+    if zone_points:
+        pts = [(p[0] * w, p[1] * h) for p in zone_points]
+        draw.line(pts + [pts[0]], fill=(245, 158, 11), width=4)
+
+    centers = []
+    for bbox, color in ((subject_bbox, (37, 99, 235)), (hazard_bbox, (220, 38, 38))):
+        if bbox and len(bbox) == 4:
+            x1, y1, x2, y2 = bbox
+            px = (x1 * w, y1 * h, x2 * w, y2 * h)
+            draw.rectangle(px, outline=color, width=4)
+            centers.append(((px[0] + px[2]) / 2, (px[1] + px[3]) / 2))
+    if len(centers) == 2:
+        draw.line(centers, fill=(220, 38, 38), width=3)
+
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
 
 
-def analyze_frame(raw_bytes: bytes, rule_text: str, zone_name: str | None = None) -> dict:
+def _build_ppe_prompt(required_ppe: list, zone_name: str | None) -> str:
+    items_desc = ", ".join(required_ppe)
+    zone_prefix = (
+        f"You are looking at a cropped image showing ONLY the contents of a "
+        f"monitored zone called '{zone_name}'. Ignore anything outside this zone. "
+        if zone_name else ""
+    )
+    return (
+        f"{zone_prefix}Look at this image. First determine if a person is visible. "
+        "If no person is visible, respond with person_present false. If a person is "
+        "visible, examine what protective equipment they are wearing. For each of "
+        "these required items, state whether it is clearly visible on the person, "
+        f"clearly absent, or not determinable from this camera angle: {items_desc}. "
+        'Respond ONLY with JSON: {"person_present": true or false, "items": '
+        '[{"name": string, "status": "present" or "missing" or "not_visible"}], '
+        '"triggered": true or false, "explanation": string, "confidence": 0.0 to 1.0, '
+        '"bbox": [x1,y1,x2,y2] or null}. Set triggered to true only if at least one '
+        "required item has status missing. Do not set triggered true for items with "
+        "status not_visible."
+    )
+
+
+def _build_proximity_prompt(subject: str, hazard: str, zone_name: str | None) -> str:
+    zone_prefix = (
+        f"You are looking at a cropped image showing ONLY the contents of a "
+        f"monitored zone called '{zone_name}'. Ignore anything outside this zone. "
+        if zone_name else ""
+    )
+    return (
+        f"{zone_prefix}Look at this image. Determine whether {subject} and {hazard} are "
+        "both visible, and if so how close they are to each other. Respond ONLY with JSON: "
+        '{"subject_present": true or false, "hazard_present": true or false, "proximity": '
+        '"touching" or "very_close" or "nearby" or "far" or "not_applicable", '
+        '"triggered": true or false, "explanation": string describing the spatial '
+        'relationship, "confidence": 0.0 to 1.0, "subject_bbox": [x1,y1,x2,y2] or null, '
+        '"hazard_bbox": [x1,y1,x2,y2] or null}. Set proximity to not_applicable if either '
+        "object is missing. Set triggered true only when proximity is touching or very_close."
+    )
+
+
+def analyze_frame(
+    raw_bytes: bytes,
+    rule_text: str,
+    zone_name: str | None = None,
+    rule_type: str = "standard",
+    required_ppe: list | None = None,
+    subject: str | None = None,
+    hazard: str | None = None,
+) -> dict:
     """Evaluates a single rule against a frame. If zone_name is given, the rule
     is scoped to that zone's polygon only (looked up fresh from zones_store):
     the image sent to the model is CROPPED to the zone's bounding rectangle so
@@ -180,6 +249,14 @@ def analyze_frame(raw_bytes: bytes, rule_text: str, zone_name: str | None = None
         img = Image.open(BytesIO(raw_bytes)).convert("RGB")
         cropped_img, crop_rect_norm = _crop_to_zone(img, zone_points)
         b64_image = _encode_image(cropped_img)
+    else:
+        b64_image = resize_and_encode(raw_bytes)
+
+    if rule_type == "ppe_check":
+        prompt = _build_ppe_prompt(required_ppe or [], zone_name if zone_points else None)
+    elif rule_type == "proximity":
+        prompt = _build_proximity_prompt(subject or "", hazard or "", zone_name if zone_points else None)
+    elif zone_points:
         prompt = (
             f"You are looking at a cropped image showing ONLY the contents of a "
             f"monitored zone called '{zone_name}'. Ignore anything outside this zone. "
@@ -189,7 +266,6 @@ def analyze_frame(raw_bytes: bytes, rule_text: str, zone_name: str | None = None
             '"confidence": 0.0 to 1.0, "bbox": [x1,y1,x2,y2] or null}'
         )
     else:
-        b64_image = resize_and_encode(raw_bytes)
         prompt = (
             f"Rule: {rule_text}. "
             "Does this frame violate the rule? "
@@ -238,50 +314,83 @@ def analyze_frame(raw_bytes: bytes, rule_text: str, zone_name: str | None = None
     result = parse_response(raw)
 
     triggered = result.get("triggered", False)
-    bbox = _normalize_bbox(result.get("bbox"), b64_image)
 
-    if bbox and crop_rect_norm:
-        # bbox is relative to the cropped image — map it back into full-frame
-        # normalised coordinates so it can be compared against the zone polygon
-        cx1, cy1, cx2, cy2 = crop_rect_norm
-        bx1, by1, bx2, by2 = bbox
-        bbox = [
-            cx1 + bx1 * (cx2 - cx1),
-            cy1 + by1 * (cy2 - cy1),
-            cx1 + bx2 * (cx2 - cx1),
-            cy1 + by2 * (cy2 - cy1),
-        ]
+    if rule_type == "ppe_check" and not result.get("person_present", True):
+        # no person in frame — never alert on PPE regardless of what the model
+        # put in "items" or "triggered"
+        triggered = False
 
     position_unverified = False
 
-    if not triggered:
-        print(f"Rule '{rule_text}' — not triggered — skipped")
-    elif zone_points:
-        if bbox and len(bbox) == 4:
-            x1, y1, x2, y2 = bbox
-            center = ((x1 + x2) / 2, (y1 + y2) / 2)
-            cx, cy = round(center[0], 3), round(center[1], 3)
-            if point_in_polygon(center, zone_points):
-                print(
-                    f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
-                    f"bbox centre [{cx},{cy}] — INSIDE zone — alert created"
-                )
-            else:
-                print(
-                    f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
-                    f"bbox centre [{cx},{cy}] — OUTSIDE zone — alert suppressed"
-                )
+    def _map_back(box):
+        if box and crop_rect_norm:
+            cx1, cy1, cx2, cy2 = crop_rect_norm
+            bx1, by1, bx2, by2 = box
+            return [
+                cx1 + bx1 * (cx2 - cx1),
+                cy1 + by1 * (cy2 - cy1),
+                cx1 + bx2 * (cx2 - cx1),
+                cy1 + by2 * (cy2 - cy1),
+            ]
+        return box
+
+    if rule_type == "proximity":
+        subject_bbox = _map_back(_normalize_bbox(result.get("subject_bbox"), b64_image))
+        hazard_bbox = _map_back(_normalize_bbox(result.get("hazard_bbox"), b64_image))
+
+        if triggered and subject_bbox and hazard_bbox and len(subject_bbox) == 4 and len(hazard_bbox) == 4:
+            sx = (subject_bbox[0] + subject_bbox[2]) / 2
+            sy = (subject_bbox[1] + subject_bbox[3]) / 2
+            hx = (hazard_bbox[0] + hazard_bbox[2]) / 2
+            hy = (hazard_bbox[1] + hazard_bbox[3]) / 2
+            dist = ((sx - hx) ** 2 + (sy - hy) ** 2) ** 0.5
+            frame_diagonal = 2 ** 0.5  # normalised 0-1 axes, diagonal of the unit square
+            if dist > 0.4 * frame_diagonal:
+                print("proximity overridden — objects too far apart geometrically")
                 triggered = False
-        else:
-            # triggered=true but no bbox to verify against the zone geometrically —
-            # trust the model, but flag the alert as unverified
+            else:
+                print(f"Rule '{rule_text}' — triggered — proximity='{result.get('proximity')}' — alert created")
+        elif triggered:
+            # triggered=true but missing a bbox to verify geometrically — trust
+            # the model, but flag the alert as unverified (same pattern as zones)
             position_unverified = True
-            print(
-                f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
-                "no bbox returned — position unverified — alert created"
-            )
+            print(f"Rule '{rule_text}' — triggered — no bbox pair to verify — position unverified — alert created")
+        else:
+            print(f"Rule '{rule_text}' — not triggered — skipped")
+
+        result["subject_bbox"] = subject_bbox
+        result["hazard_bbox"] = hazard_bbox
     else:
-        print(f"Rule '{rule_text}' — triggered — whole frame rule — alert created")
+        bbox = _map_back(_normalize_bbox(result.get("bbox"), b64_image))
+
+        if not triggered:
+            print(f"Rule '{rule_text}' — not triggered — skipped")
+        elif zone_points:
+            if bbox and len(bbox) == 4:
+                x1, y1, x2, y2 = bbox
+                center = ((x1 + x2) / 2, (y1 + y2) / 2)
+                cx, cy = round(center[0], 3), round(center[1], 3)
+                if point_in_polygon(center, zone_points):
+                    print(
+                        f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
+                        f"bbox centre [{cx},{cy}] — INSIDE zone — alert created"
+                    )
+                else:
+                    print(
+                        f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
+                        f"bbox centre [{cx},{cy}] — OUTSIDE zone — alert suppressed"
+                    )
+                    triggered = False
+            else:
+                # triggered=true but no bbox to verify against the zone geometrically —
+                # trust the model, but flag the alert as unverified
+                position_unverified = True
+                print(
+                    f"Rule '{rule_text}' — triggered in zone '{zone_name}' — "
+                    "no bbox returned — position unverified — alert created"
+                )
+        else:
+            print(f"Rule '{rule_text}' — triggered — whole frame rule — alert created")
 
     result["triggered"] = triggered
     result["zone"] = zone_name
@@ -295,16 +404,51 @@ def parse_response(raw: str) -> dict:
     return json.loads(cleaned)
 
 
-def _evaluate_rule(rule_text: str, zone_name: str | None, raw_bytes: bytes) -> dict:
+def _evaluate_rule(
+    rule_text: str,
+    zone_name: str | None,
+    raw_bytes: bytes,
+    rule_type: str = "standard",
+    required_ppe: list | None = None,
+    subject: str | None = None,
+    hazard: str | None = None,
+) -> dict:
     """Runs in a worker thread — logs start/finish with millisecond timestamps
     so overlapping runs are visible in the terminal as proof of parallelism."""
     start_label = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     zone_label = f" zone='{zone_name}'" if zone_name else ""
     print(f"[{start_label}] START  rule='{rule_text}'{zone_label}")
-    result = analyze_frame(raw_bytes, rule_text, zone_name)
+    result = analyze_frame(
+        raw_bytes, rule_text, zone_name,
+        rule_type=rule_type, required_ppe=required_ppe, subject=subject, hazard=hazard,
+    )
     finish_label = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     print(f"[{finish_label}] FINISH rule='{rule_text}'{zone_label} triggered={result.get('triggered')}")
     return result
+
+
+def build_alert(rule_entry: dict, result: dict, filename: str, ts: datetime) -> dict:
+    """Assembles the alert record stored/returned for a triggered rule — shared
+    by the live DetectorThread and the one-shot DemoRunThread so rule-type-
+    specific fields (ppe_check 'items', proximity bboxes) are handled once."""
+    alert = {
+        "id": filename,
+        "timestamp": ts.isoformat(timespec="seconds"),
+        "rule": rule_entry["rule_text"],
+        "explanation": result.get("explanation", ""),
+        "confidence": round(float(result.get("confidence", 0.0)), 2),
+        "thumbnail": f"/alerts/{filename}",
+        "zone": result.get("zone"),
+        "position_unverified": result.get("position_unverified", False),
+        "rule_type": rule_entry.get("rule_type", "standard"),
+    }
+    if rule_entry.get("rule_type") == "ppe_check":
+        alert["items"] = result.get("items", [])
+    elif rule_entry.get("rule_type") == "proximity":
+        alert["proximity"] = result.get("proximity")
+        alert["subject_bbox"] = result.get("subject_bbox")
+        alert["hazard_bbox"] = result.get("hazard_bbox")
+    return alert
 
 
 class DetectorThread(threading.Thread):
@@ -357,7 +501,9 @@ class DetectorThread(threading.Thread):
                         with ThreadPoolExecutor(max_workers=max_workers) as executor:
                             futures = {
                                 executor.submit(
-                                    _evaluate_rule, r["rule_text"], r.get("zone_name"), raw_bytes
+                                    _evaluate_rule, r["rule_text"], r.get("zone_name"), raw_bytes,
+                                    r.get("rule_type", "standard"), r.get("required_ppe"),
+                                    r.get("subject"), r.get("hazard"),
                                 ): r
                                 for r in enabled_rules
                             }
@@ -373,26 +519,21 @@ class DetectorThread(threading.Thread):
                                     ts = datetime.now()
                                     filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
 
-                                    # evidence is always the FULL frame — with the
-                                    # zone polygon drawn on it if this rule has one
+                                    # evidence is always the FULL frame — with the zone
+                                    # polygon and/or proximity bboxes drawn on it
                                     zone_name = rule_entry.get("zone_name")
                                     zone_points = zones_store.get_zones().get(zone_name) if zone_name else None
+                                    is_proximity = rule_entry.get("rule_type") == "proximity"
+                                    subject_bbox = result.get("subject_bbox") if is_proximity else None
+                                    hazard_bbox = result.get("hazard_bbox") if is_proximity else None
                                     evidence_bytes = (
-                                        _draw_zone_overlay(raw_bytes, zone_points)
-                                        if zone_points else raw_bytes
+                                        _draw_zone_overlay(raw_bytes, zone_points, subject_bbox, hazard_bbox)
+                                        if (zone_points or subject_bbox or hazard_bbox) else raw_bytes
                                     )
                                     (Path(config.ALERTS_DIR) / filename).write_bytes(evidence_bytes)
 
-                                    alert = {
-                                        "id": filename,
-                                        "timestamp": ts.isoformat(timespec="seconds"),
-                                        "rule": rule_entry["rule_text"],
-                                        "explanation": result.get("explanation", ""),
-                                        "confidence": round(float(result.get("confidence", 0.0)), 2),
-                                        "thumbnail": f"/alerts/{filename}",
-                                        "zone": result.get("zone"),
-                                        "position_unverified": result.get("position_unverified", False),
-                                    }
+                                    alert = build_alert(rule_entry, result, filename, ts)
+                                    incident_log.log_incident(alert)
                                     with self._lock:
                                         self._alerts.appendleft(alert)
                                     self.queue.put(alert)

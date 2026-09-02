@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": "1e0f9e2df64c4af999fee59c29cf5797",
+    "rule_text": "Proximity: hand near sticky notes",
+    "zone_name": "zone",
+    "enabled": true,
+    "zone_name_cleared": false,
+    "rule_type": "proximity",
+    "subject": "hand",
+    "hazard": "sticky notes"
+  }
+]

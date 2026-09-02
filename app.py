@@ -3,10 +3,13 @@ import time
 from pathlib import Path
 
 import cv2
+import requests
+import urllib3
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 import config
+import incident_log
 import rules_store
 import runtime_state
 import zones_store
@@ -276,7 +279,26 @@ def create_rule():
     zone_name = (data.get("zone_name") or "").strip() or None
     if zone_name and zone_name not in zones_store.get_zones():
         return jsonify(error="Unknown zone"), 400
-    rule = rules_store.add_rule(rule_text, zone_name)
+
+    rule_type = (data.get("rule_type") or "standard").strip()
+    if rule_type not in ("standard", "ppe_check", "proximity"):
+        return jsonify(error="Invalid rule_type"), 400
+
+    required_ppe = data.get("required_ppe") or []
+    if rule_type == "ppe_check":
+        if not isinstance(required_ppe, list) or not all(isinstance(x, str) for x in required_ppe) or not required_ppe:
+            return jsonify(error="required_ppe must be a non-empty list of strings for PPE check rules"), 400
+
+    subject = (data.get("subject") or "").strip()
+    hazard = (data.get("hazard") or "").strip()
+    if rule_type == "proximity":
+        if not subject or not hazard:
+            return jsonify(error="subject and hazard are required for proximity rules"), 400
+
+    rule = rules_store.add_rule(
+        rule_text, zone_name, rule_type=rule_type, required_ppe=required_ppe,
+        subject=subject, hazard=hazard,
+    )
     return jsonify(ok=True, rule=rule)
 
 

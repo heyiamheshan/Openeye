@@ -6,8 +6,9 @@ from pathlib import Path
 import cv2
 
 import config
+import incident_log
 import zones_store
-from detector import _draw_zone_overlay, _evaluate_rule
+from detector import _draw_zone_overlay, _evaluate_rule, build_alert
 
 TARGET_FRAMES = 30
 MAX_FRAMES = 40
@@ -103,7 +104,9 @@ class DemoRunThread(threading.Thread):
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
                         executor.submit(
-                            _evaluate_rule, r["rule_text"], r.get("zone_name"), raw_bytes
+                            _evaluate_rule, r["rule_text"], r.get("zone_name"), raw_bytes,
+                            r.get("rule_type", "standard"), r.get("required_ppe"),
+                            r.get("subject"), r.get("hazard"),
                         ): r
                         for r in self.rules
                     }
@@ -121,22 +124,17 @@ class DemoRunThread(threading.Thread):
 
                             zone_name = rule_entry.get("zone_name")
                             zone_points = zones_store.get_zones().get(zone_name) if zone_name else None
+                            is_proximity = rule_entry.get("rule_type") == "proximity"
+                            subject_bbox = result.get("subject_bbox") if is_proximity else None
+                            hazard_bbox = result.get("hazard_bbox") if is_proximity else None
                             evidence_bytes = (
-                                _draw_zone_overlay(raw_bytes, zone_points)
-                                if zone_points else raw_bytes
+                                _draw_zone_overlay(raw_bytes, zone_points, subject_bbox, hazard_bbox)
+                                if (zone_points or subject_bbox or hazard_bbox) else raw_bytes
                             )
                             (Path(config.ALERTS_DIR) / filename).write_bytes(evidence_bytes)
 
-                            alert = {
-                                "id": filename,
-                                "timestamp": ts.isoformat(timespec="seconds"),
-                                "rule": rule_entry["rule_text"],
-                                "explanation": result.get("explanation", ""),
-                                "confidence": round(float(result.get("confidence", 0.0)), 2),
-                                "thumbnail": f"/alerts/{filename}",
-                                "zone": result.get("zone"),
-                                "position_unverified": result.get("position_unverified", False),
-                            }
+                            alert = build_alert(rule_entry, result, filename, ts)
+                            incident_log.log_incident(alert)
                             with self._lock:
                                 self._alerts.append(alert)
         finally:

@@ -953,6 +953,7 @@ function loadRules() {
       zone: r.zone_name,
       enabled: r.enabled,
       zoneCleared: r.zone_name_cleared,
+      ruleType: r.rule_type || 'standard',
     }));
     renderRules();
     renderZoneList();
@@ -961,14 +962,23 @@ function loadRules() {
   }).catch(() => {});
 }
 
-function addRule(text, zone) {
+function addRule(text, zone, ruleType, requiredPpe, subject, hazard) {
   text = (text || '').trim();
   if (!text || monitoringActive) return;
   const zoneName = zone && savedZones[zone] ? zone : null;
+  const body = { rule_text: text, zone_name: zoneName };
+  if (ruleType === 'ppe_check') {
+    body.rule_type = 'ppe_check';
+    body.required_ppe = requiredPpe || [];
+  } else if (ruleType === 'proximity') {
+    body.rule_type = 'proximity';
+    body.subject = subject || '';
+    body.hazard = hazard || '';
+  }
   fetch('/rules', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rule_text: text, zone_name: zoneName }),
+    body: JSON.stringify(body),
   })
     .then(r => r.json())
     .then(d => { if (d.ok) loadRules(); });
@@ -1007,6 +1017,20 @@ function renderRules() {
 
     row.appendChild(check);
     row.appendChild(text);
+
+    if (r.ruleType === 'ppe_check') {
+      const pb = document.createElement('span');
+      pb.className = 'rule-ppe-badge';
+      pb.textContent = 'PPE';
+      pb.title = 'PPE compliance check';
+      row.appendChild(pb);
+    } else if (r.ruleType === 'proximity') {
+      const pb = document.createElement('span');
+      pb.className = 'rule-ppe-badge';
+      pb.textContent = 'PROX';
+      pb.title = 'Proximity rule';
+      row.appendChild(pb);
+    }
 
     if (r.zone) {
       const zb = document.createElement('span');
@@ -1056,11 +1080,53 @@ function syncZoneSelect() {
 }
 
 // composer
+const ruleTypeSelectEl        = document.getElementById('ruleTypeSelect');
+const ppeChecklistEl          = document.getElementById('ppeChecklist');
+const proximitySubjectInputEl = document.getElementById('proximitySubjectInput');
+const proximityHazardInputEl  = document.getElementById('proximityHazardInput');
+
+function ppeItemLabel(cb) {
+  return cb.parentElement.textContent.trim();
+}
+
+function checkedPpeItems() {
+  return Array.from(ppeChecklistEl.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(cb => cb.value);
+}
+
+ruleTypeSelectEl.addEventListener('change', () => {
+  const isPpe       = ruleTypeSelectEl.value === 'ppe_check';
+  const isProximity = ruleTypeSelectEl.value === 'proximity';
+  document.getElementById('ruleInput').hidden = isPpe || isProximity;
+  ppeChecklistEl.hidden = !isPpe;
+  proximitySubjectInputEl.hidden = !isProximity;
+  proximityHazardInputEl.hidden = !isProximity;
+});
+
 document.getElementById('addRuleBtn').addEventListener('click', () => {
-  const input = document.getElementById('ruleInput');
-  addRule(input.value, document.getElementById('zoneSelect').value);
-  input.value = '';
-  input.focus();
+  const zone = document.getElementById('zoneSelect').value;
+  if (ruleTypeSelectEl.value === 'ppe_check') {
+    const items = checkedPpeItems();
+    if (items.length === 0) return;
+    const shortLabels = Array.from(ppeChecklistEl.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(cb => ppeItemLabel(cb));
+    const text = `PPE check: ${shortLabels.join(', ')}`;
+    addRule(text, zone, 'ppe_check', items);
+    ppeChecklistEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+  } else if (ruleTypeSelectEl.value === 'proximity') {
+    const subject = proximitySubjectInputEl.value.trim();
+    const hazard  = proximityHazardInputEl.value.trim();
+    if (!subject || !hazard) return;
+    const text = `Proximity: ${subject} near ${hazard}`;
+    addRule(text, zone, 'proximity', null, subject, hazard);
+    proximitySubjectInputEl.value = '';
+    proximityHazardInputEl.value = '';
+  } else {
+    const input = document.getElementById('ruleInput');
+    addRule(input.value, zone);
+    input.value = '';
+    input.focus();
+  }
 });
 
 document.getElementById('ruleInput').addEventListener('keydown', (e) => {
@@ -1068,6 +1134,40 @@ document.getElementById('ruleInput').addEventListener('keydown', (e) => {
 });
 
 // rule library dropdown overlay
+const PROXIMITY_PRESETS = [
+  { label: 'Person near forklift',              subject: 'a person', hazard: 'a forklift' },
+  { label: 'Person under suspended load',       subject: 'a person', hazard: 'a suspended load' },
+  { label: 'Hand near cutting blade',           subject: 'a hand',   hazard: 'a cutting blade' },
+  { label: 'Person near moving conveyor',       subject: 'a person', hazard: 'a moving conveyor' },
+  { label: 'Person near open electrical panel', subject: 'a person', hazard: 'an open electrical panel' },
+  { label: 'Worker near unguarded machine',     subject: 'a worker', hazard: 'an unguarded machine' },
+];
+
+function useProximityPreset(preset) {
+  ruleTypeSelectEl.value = 'proximity';
+  ruleTypeSelectEl.dispatchEvent(new Event('change'));
+  document.getElementById('proximitySubjectInput').value = preset.subject;
+  document.getElementById('proximityHazardInput').value = preset.hazard;
+}
+
+function appendProximityPresets(container) {
+  const h = document.createElement('div');
+  h.className = 'library-category';
+  h.textContent = 'Proximity';
+  container.appendChild(h);
+  PROXIMITY_PRESETS.forEach(preset => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'library-item';
+    b.textContent = preset.label;
+    b.addEventListener('click', () => {
+      useProximityPreset(preset);
+      toggleRuleLibrary(false);
+    });
+    container.appendChild(b);
+  });
+}
+
 function appendLibraryCategories(container, categories) {
   Object.entries(categories).forEach(([cat, items]) => {
     const h = document.createElement('div');
@@ -1100,6 +1200,7 @@ function renderRuleLibrary() {
   mfgTitle.textContent = 'Smart Manufacturing';
   mfgSection.appendChild(mfgTitle);
   appendLibraryCategories(mfgSection, RULE_LIBRARY_MANUFACTURING);
+  appendProximityPresets(mfgSection);
   lib.appendChild(mfgSection);
 
   // section 2 — Other Use Cases, collapsed by default behind "Show more"
@@ -1241,11 +1342,21 @@ function renderAlerts(alerts) {
     expl.className = 'alert-explanation';
     expl.textContent = alert.explanation || '';
 
+    body.appendChild(expl);
+
+    if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
+      body.appendChild(buildPpeChecklist(alert.items));
+    }
+
     const meta = document.createElement('p');
     meta.className = 'alert-meta';
-    meta.textContent = alertMetaText(alert);
-
-    body.appendChild(expl);
+    if (alert.rule_type === 'proximity' && (alert.proximity === 'touching' || alert.proximity === 'very_close')) {
+      const badge = document.createElement('span');
+      badge.className = 'proximity-badge';
+      badge.textContent = alert.proximity === 'touching' ? 'TOUCHING' : 'VERY CLOSE';
+      meta.appendChild(badge);
+    }
+    meta.appendChild(document.createTextNode(alertMetaText(alert)));
     body.appendChild(meta);
     row.appendChild(img);
     row.appendChild(dl);
@@ -1253,6 +1364,36 @@ function renderAlerts(alerts) {
     frag.appendChild(row);
   });
   if (frag.childNodes.length > 0) list.insertBefore(frag, list.firstChild);
+}
+
+const PPE_STATUS_LABEL = { present: 'Present', missing: 'Missing', not_visible: 'Not visible' };
+
+function buildPpeChecklistRows(items) {
+  const frag = document.createDocumentFragment();
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'ppe-item';
+    const dot = document.createElement('span');
+    dot.className = `ppe-dot ppe-dot-${item.status || 'not_visible'}`;
+    const name = document.createElement('span');
+    name.className = 'ppe-item-name';
+    name.textContent = item.name;
+    const status = document.createElement('span');
+    status.className = 'ppe-item-status';
+    status.textContent = PPE_STATUS_LABEL[item.status] || item.status || '';
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(status);
+    frag.appendChild(row);
+  });
+  return frag;
+}
+
+function buildPpeChecklist(items) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ppe-checklist-result';
+  wrap.appendChild(buildPpeChecklistRows(items));
+  return wrap;
 }
 
 function alertMetaText(alert) {
@@ -1297,10 +1438,21 @@ function downloadAlertImage(alert) {
   a.remove();
 }
 
+const lightboxPpeEl = document.getElementById('lightboxPpeChecklist');
+
 function openLightbox(alert) {
   lightboxAlert = alert;
   lightboxImgEl.src = alert.thumbnail;
   lightboxExplEl.textContent = alert.explanation || '';
+
+  lightboxPpeEl.innerHTML = '';
+  if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
+    lightboxPpeEl.appendChild(buildPpeChecklistRows(alert.items));
+    lightboxPpeEl.hidden = false;
+  } else {
+    lightboxPpeEl.hidden = true;
+  }
+
   lightboxMetaEl.textContent = alertMetaText(alert);
   lightboxBackdropEl.hidden = false;
 }

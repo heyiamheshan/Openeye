@@ -125,10 +125,46 @@
             autocomplete="off"
             spellcheck="false"
           />
+          <input
+            id="proximitySubjectInput"
+            class="proximity-input"
+            type="text"
+            title="Subject"
+            placeholder="a person"
+            maxlength="80"
+            autocomplete="off"
+            spellcheck="false"
+            hidden
+          />
+          <input
+            id="proximityHazardInput"
+            class="proximity-input"
+            type="text"
+            title="Near"
+            placeholder="a forklift"
+            maxlength="80"
+            autocomplete="off"
+            spellcheck="false"
+            hidden
+          />
+          <select id="ruleTypeSelect" title="Rule type">
+            <option value="standard" selected>Standard</option>
+            <option value="ppe_check">PPE check</option>
+            <option value="proximity">Proximity</option>
+          </select>
           <select id="zoneSelect" title="Restrict rule to a zone">
             <option value="">Whole frame</option>
           </select>
           <button type="button" class="btn-primary btn-sm-w" id="addRuleBtn">Add</button>
+        </div>
+
+        <div class="ppe-checklist" id="ppeChecklist" hidden>
+          <label class="ppe-option"><input type="checkbox" value="helmet" /> Helmet</label>
+          <label class="ppe-option"><input type="checkbox" value="high-visibility vest" /> High-visibility vest</label>
+          <label class="ppe-option"><input type="checkbox" value="safety gloves" /> Safety gloves</label>
+          <label class="ppe-option"><input type="checkbox" value="protective eyewear" /> Protective eyewear</label>
+          <label class="ppe-option"><input type="checkbox" value="face mask" /> Face mask</label>
+          <label class="ppe-option"><input type="checkbox" value="safety boots" /> Safety boots</label>
         </div>
 
         <div class="rule-library-wrap">
@@ -161,6 +197,7 @@
     <div class="lightbox-card">
       <img id="lightboxImg" class="lightbox-img" alt="Alert frame" />
       <p class="lightbox-explanation" id="lightboxExplanation"></p>
+      <div class="ppe-checklist-large" id="lightboxPpeChecklist" hidden></div>
       <p class="lightbox-meta" id="lightboxMeta"></p>
       <div class="lightbox-actions">
         <button type="button" class="btn-rose" id="lightboxDownloadBtn">Download</button>

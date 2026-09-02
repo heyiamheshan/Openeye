@@ -659,6 +659,23 @@ button {
 
 #ruleInput::placeholder { color: var(--text-3); }
 
+.proximity-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 100ms;
+}
+
+.proximity-input:focus { border-color: var(--text-3); }
+.proximity-input::placeholder { color: var(--text-3); }
+
 #zoneSelect {
   width: 128px;
   flex-shrink: 0;
@@ -675,6 +692,105 @@ button {
 }
 
 #zoneSelect:focus { border-color: var(--text-3); }
+
+#ruleTypeSelect {
+  width: 108px;
+  flex-shrink: 0;
+  padding: 7px 6px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 100ms;
+}
+
+#ruleTypeSelect:focus { border-color: var(--text-3); }
+
+/* PPE checklist — checkbox group shown in place of the free-text input */
+.ppe-checklist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+.ppe-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ppe-option input[type="checkbox"] {
+  accent-color: var(--zone-red);
+  width: 14px;
+  height: 14px;
+}
+
+.rule-ppe-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--zone-red-dark);
+  background: var(--zone-red-50);
+  border-radius: var(--radius-xs);
+}
+
+/* PPE checklist result — rendered inside an alert card / lightbox */
+.ppe-checklist-result,
+.ppe-checklist-large {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.ppe-checklist-large { gap: 6px; margin-top: 10px; }
+
+.ppe-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.ppe-checklist-large .ppe-item { font-size: 14px; color: var(--text); }
+
+.ppe-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.ppe-checklist-large .ppe-dot { width: 10px; height: 10px; }
+
+.ppe-dot-present     { background: #16A34A; }
+.ppe-dot-missing     { background: var(--zone-red); }
+.ppe-dot-not_visible { background: var(--text-3); }
+
+.ppe-item-name { flex: 1; }
+
+.ppe-item-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.ppe-checklist-large .ppe-item-status { font-size: 12px; }
 
 /* rule library link + dropdown overlay */
 .rule-library-wrap {
@@ -863,6 +979,7 @@ button {
 
 /* rules locked while monitoring */
 .rules-card.locked .rule-composer,
+.rules-card.locked .ppe-checklist,
 .rules-card.locked .library-link,
 .rules-card.locked .rule-check,
 .rules-card.locked .rule-del {
@@ -983,6 +1100,19 @@ button {
   text-overflow: ellipsis;
 }
 
+.proximity-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #FFFFFF;
+  background: var(--rose);
+  border-radius: var(--radius-xs);
+  vertical-align: middle;
+}
+
 .empty-state {
   padding: 32px 0;
   text-align: center;
@@ -1078,4 +1208,5 @@ button {
   .layout { padding: 12px; gap: 12px; }
   .rule-composer { flex-wrap: wrap; }
   #zoneSelect { width: 100%; }
+  #ruleTypeSelect { width: 100%; }
 }
