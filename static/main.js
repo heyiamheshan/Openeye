@@ -21,10 +21,15 @@ const frameEl     = document.getElementById('cameraFrame');
 const frozenFrameEl = document.getElementById('frozenFrame');
 
 // ── constants ─────────────────────────────────────────────────────────────────
-const ROSE_FILL      = 'rgba(255,241,242,0.30)';   // rose-50 @ 30% opacity
-const ROSE_FILL_MOVE = 'rgba(255,241,242,0.45)';
-const ROSE_STROKE    = '#FDA4AF';                  // rose-300
-const ROSE_LABEL     = '#E11D48';                  // rose-600
+const ROSE_FILL      = 'rgba(254,242,242,0.30)';   // zone-red-50 @ 30% opacity
+const ROSE_FILL_MOVE = 'rgba(254,242,242,0.45)';
+const ROSE_STROKE    = '#FCA5A5';                  // zone-red-300
+const ROSE_LABEL     = '#DC2626';                  // zone-red-600
+
+// saved (persisted) zones need to read clearly against any camera background,
+// so they use a bolder fill/stroke than the pale in-progress draw preview
+const ZONE_SAVED_FILL   = 'rgba(220,38,38,0.28)';  // zone-red-600 @ 28% opacity
+const ZONE_SAVED_STROKE = '#DC2626';               // zone-red-600, solid
 const HANDLE_R        = 6;
 const CIRCLE_SEGS     = 48;
 const DEMO_W          = 1280;
@@ -50,6 +55,13 @@ let circleEdge   = null;
 // move-phase state
 let moveActive = false;
 let moveLast   = null;
+
+// resize-phase state (rect corners / circle radius)
+let pendingShapeType = null;   // 'rect' | 'poly' | 'circle'
+let resizeMode       = null;   // null | 'rect-corner' | 'circle-edge'
+let resizeCornerIndex = -1;    // which of the 4 rect corners is being dragged
+let resizeAnchor      = null;  // rect: opposite corner, normalised {x,y}
+let resizeCenterPx    = null;  // circle: fixed centre in pixel space during resize
 
 // demo state
 let demoStreamStarted = false;
@@ -358,15 +370,17 @@ function enterDraw() {
   pendingPoly = null;
   circleCenter = circleEdge = null;
   moveActive = false; moveLast = null;
+  pendingShapeType = null;
+  resizeMode = null; resizeCornerIndex = -1; resizeAnchor = null; resizeCenterPx = null;
   promptEl.classList.remove('visible');
-  document.getElementById('shapePicker').hidden = false;
+  document.getElementById('drawToolbar').hidden = false;
 
   drawMode = (document.querySelector('input[name="drawMode"]:checked') || {}).value || 'rect';
 
   freezeFeed();
 
   drawBtn.classList.add('btn-draw-active');
-  drawBtn.textContent = 'Cancel';
+  drawBtn.hidden = true;
   canvas.classList.add('drawing');
 
   setHint(DRAW_HINTS[drawMode] || '');
@@ -379,7 +393,10 @@ function enterMove() {
   moveLast   = null;
   canvas.classList.remove('drawing');
   canvas.classList.add('moving');
-  setHint('Drag to reposition the zone, then name it below ↓');
+  const resizeHint = pendingShapeType === 'rect' ? ' · drag a corner to resize'
+                    : pendingShapeType === 'circle' ? ' · drag the edge handle to resize'
+                    : '';
+  setHint(`Drag to reposition${resizeHint}, then name it below ↓`);
   redraw();
 }
 
@@ -390,11 +407,13 @@ function cancelDraw() {
   pendingPoly = null;
   circleCenter = circleEdge = null;
   moveActive = false; moveLast = null;
+  pendingShapeType = null;
+  resizeMode = null; resizeCornerIndex = -1; resizeAnchor = null; resizeCenterPx = null;
 
   drawBtn.classList.remove('btn-draw-active');
-  drawBtn.textContent = 'Draw zone';
+  drawBtn.hidden = false;
   canvas.classList.remove('drawing', 'moving', 'grabbing');
-  document.getElementById('shapePicker').hidden = true;
+  document.getElementById('drawToolbar').hidden = true;
   promptEl.classList.remove('visible');
   setHint('');
 
@@ -428,7 +447,21 @@ canvas.addEventListener('mousedown', (e) => {
   }
 
   if (phase === 'move' || phase === 'name') {
-    if (pointInPendingPoly(p)) {
+    const cornerIdx = hitRectHandle(p);
+    if (cornerIdx !== -1) {
+      resizeMode = 'rect-corner';
+      resizeCornerIndex = cornerIdx;
+      const anchorIdx = (cornerIdx + 2) % 4;
+      resizeAnchor = { x: pendingPoly[anchorIdx][0], y: pendingPoly[anchorIdx][1] };
+      canvas.classList.add('grabbing');
+    } else if (hitCircleHandle(p)) {
+      resizeMode = 'circle-edge';
+      const pts = pendingPoly.map(([nx, ny]) => ({ x: nx * canvas.width, y: ny * canvas.height }));
+      const cx = pts.reduce((s, q) => s + q.x, 0) / pts.length;
+      const cy = pts.reduce((s, q) => s + q.y, 0) / pts.length;
+      resizeCenterPx = { x: cx, y: cy };
+      canvas.classList.add('grabbing');
+    } else if (pointInPendingPoly(p)) {
       moveActive = true;
       moveLast   = p;
       canvas.classList.add('grabbing');
@@ -446,7 +479,24 @@ canvas.addEventListener('mousemove', (e) => {
     if (drawMode === 'circle' && circleCenter) circleEdge = p;
   }
 
-  if ((phase === 'move' || phase === 'name') && moveActive && pendingPoly) {
+  if ((phase === 'move' || phase === 'name') && resizeMode === 'rect-corner' && pendingPoly) {
+    const mx = p.x / canvas.width, my = p.y / canvas.height;
+    const ax = resizeAnchor.x, ay = resizeAnchor.y;
+    if (Math.abs(mx - ax) > 0.01 && Math.abs(my - ay) > 0.01) {
+      const x1 = Math.min(ax, mx), x2 = Math.max(ax, mx);
+      const y1 = Math.min(ay, my), y2 = Math.max(ay, my);
+      pendingPoly = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+    }
+  } else if ((phase === 'move' || phase === 'name') && resizeMode === 'circle-edge' && pendingPoly) {
+    const r = Math.max(Math.hypot(p.x - resizeCenterPx.x, p.y - resizeCenterPx.y), 8);
+    pendingPoly = Array.from({ length: CIRCLE_SEGS }, (_, i) => {
+      const a = (i / CIRCLE_SEGS) * Math.PI * 2;
+      return [
+        (resizeCenterPx.x + Math.cos(a) * r) / canvas.width,
+        (resizeCenterPx.y + Math.sin(a) * r) / canvas.height,
+      ];
+    });
+  } else if ((phase === 'move' || phase === 'name') && moveActive && pendingPoly) {
     const dx = (p.x - moveLast.x) / canvas.width;
     const dy = (p.y - moveLast.y) / canvas.height;
     pendingPoly = pendingPoly.map(([nx, ny]) => [nx + dx, ny + dy]);
@@ -454,7 +504,13 @@ canvas.addEventListener('mousemove', (e) => {
   }
 
   if (phase === 'move' || phase === 'name') {
-    canvas.style.cursor = pointInPendingPoly(p) ? (moveActive ? 'grabbing' : 'grab') : 'default';
+    if (resizeMode) {
+      canvas.style.cursor = 'grabbing';
+    } else if (hitRectHandle(p) !== -1 || hitCircleHandle(p)) {
+      canvas.style.cursor = 'pointer';
+    } else {
+      canvas.style.cursor = pointInPendingPoly(p) ? (moveActive ? 'grabbing' : 'grab') : 'default';
+    }
   }
 
   redraw();
@@ -480,8 +536,12 @@ canvas.addEventListener('mouseup', (e) => {
     }
   }
 
-  if ((phase === 'move' || phase === 'name') && moveActive) {
+  if ((phase === 'move' || phase === 'name') && (moveActive || resizeMode)) {
     moveActive = false;
+    resizeMode = null;
+    resizeCornerIndex = -1;
+    resizeAnchor = null;
+    resizeCenterPx = null;
     canvas.classList.remove('grabbing');
     redraw();
   }
@@ -512,6 +572,23 @@ function evPt(e) {
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
+function hitRectHandle(p) {
+  if (pendingShapeType !== 'rect' || !pendingPoly) return -1;
+  for (let i = 0; i < pendingPoly.length; i++) {
+    const hx = pendingPoly[i][0] * canvas.width;
+    const hy = pendingPoly[i][1] * canvas.height;
+    if (Math.hypot(p.x - hx, p.y - hy) <= HANDLE_R + 4) return i;
+  }
+  return -1;
+}
+
+function hitCircleHandle(p) {
+  if (pendingShapeType !== 'circle' || !pendingPoly) return false;
+  const hx = pendingPoly[0][0] * canvas.width;
+  const hy = pendingPoly[0][1] * canvas.height;
+  return Math.hypot(p.x - hx, p.y - hy) <= HANDLE_R + 4;
+}
+
 function pointInPendingPoly(p) {
   if (!pendingPoly || pendingPoly.length < 3) return false;
   const pts = pendingPoly.map(([nx, ny]) => ({ x: nx * canvas.width, y: ny * canvas.height }));
@@ -538,6 +615,7 @@ function finishRect() {
   const x2 = Math.max(rectStart.x, rectCur.x) / canvas.width;
   const y2 = Math.max(rectStart.y, rectCur.y) / canvas.height;
   pendingPoly = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+  pendingShapeType = 'rect';
   rectStart = rectCur = null;
   enterMove();
   showNamePrompt();
@@ -545,6 +623,7 @@ function finishRect() {
 
 function finishPoly() {
   pendingPoly = polyPts.map(p => [p.x / canvas.width, p.y / canvas.height]);
+  pendingShapeType = 'poly';
   polyPts = [];
   enterMove();
   showNamePrompt();
@@ -558,6 +637,7 @@ function finishCircle() {
     const a = (i / CIRCLE_SEGS) * Math.PI * 2;
     return [(cx + Math.cos(a) * r) / canvas.width, (cy + Math.sin(a) * r) / canvas.height];
   });
+  pendingShapeType = 'circle';
   circleCenter = circleEdge = null;
   enterMove();
   showNamePrompt();
@@ -566,7 +646,10 @@ function finishCircle() {
 // ── name prompt ───────────────────────────────────────────────────────────────
 function showNamePrompt() {
   phase = 'name';
-  setHint('Drag to reposition · then name and save ↓');
+  const resizeHint = pendingShapeType === 'rect' ? ' · drag a corner to resize'
+                    : pendingShapeType === 'circle' ? ' · drag the edge handle to resize'
+                    : '';
+  setHint(`Drag to reposition${resizeHint} · then name and save ↓`);
   promptEl.classList.add('visible');
   nameInput.value = '';
   nameInput.focus();
@@ -608,7 +691,7 @@ function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   for (const [name, pts] of Object.entries(savedZones)) {
-    drawZoneShape(pts, ROSE_FILL, ROSE_STROKE, false);
+    drawZoneShape(pts, ZONE_SAVED_FILL, ZONE_SAVED_STROKE, false, 3);
     const px = pts.map(p => ({ x: p[0] * canvas.width, y: p[1] * canvas.height }));
     const cx = px.reduce((s, p) => s + p.x, 0) / px.length;
     const cy = px.reduce((s, p) => s + p.y, 0) / px.length;
@@ -642,7 +725,7 @@ function redraw() {
       });
       if (polyPts.length >= 3) {
         ctx.beginPath(); ctx.arc(polyPts[0].x, polyPts[0].y, HANDLE_R + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(217,119,6,0.4)'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = 'rgba(220,38,38,0.4)'; ctx.lineWidth = 2; ctx.stroke();
       }
     }
 
@@ -656,7 +739,7 @@ function redraw() {
       ctx.setLineDash([6, 3]); ctx.stroke(); ctx.setLineDash([]);
       if (r > 8) {
         ctx.beginPath(); ctx.moveTo(circleCenter.x, circleCenter.y); ctx.lineTo(edge.x, edge.y);
-        ctx.strokeStyle = 'rgba(217,119,6,0.5)'; ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(220,38,38,0.5)'; ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
       }
       ctx.beginPath(); ctx.arc(circleCenter.x, circleCenter.y, HANDLE_R, 0, Math.PI * 2);
@@ -670,26 +753,33 @@ function redraw() {
     const cx = px.reduce((s, p) => s + p.x, 0) / px.length;
     const cy = px.reduce((s, p) => s + p.y, 0) / px.length;
     drawMoveHandle(cx, cy, moveActive);
+
+    if (pendingShapeType === 'rect') {
+      px.forEach((p, i) => drawResizeHandle(p.x, p.y, resizeMode === 'rect-corner' && resizeCornerIndex === i));
+    } else if (pendingShapeType === 'circle') {
+      drawResizeHandle(px[0].x, px[0].y, resizeMode === 'circle-edge');
+    }
   }
 }
 
-function drawZoneShape(pts, fill, stroke, dashed) {
+function drawZoneShape(pts, fill, stroke, dashed, lineWidth) {
   const px = pts.map(p => ({ x: p[0] * canvas.width, y: p[1] * canvas.height }));
   const cx = px.reduce((s, p) => s + p.x, 0) / px.length;
   const cy = px.reduce((s, p) => s + p.y, 0) / px.length;
+  const width = lineWidth || (dashed ? 2.5 : 2);
 
   if (pts.length === CIRCLE_SEGS) {
     const r = px.reduce((s, p) => s + Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2), 0) / px.length;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = fill; ctx.fill();
-    ctx.strokeStyle = stroke; ctx.lineWidth = dashed ? 2.5 : 2;
+    ctx.strokeStyle = stroke; ctx.lineWidth = width;
     if (dashed) ctx.setLineDash([8, 4]);
     ctx.stroke(); ctx.setLineDash([]);
   } else {
     ctx.beginPath(); ctx.moveTo(px[0].x, px[0].y);
     px.forEach(p => ctx.lineTo(p.x, p.y)); ctx.closePath();
     ctx.fillStyle = fill; ctx.fill();
-    ctx.strokeStyle = stroke; ctx.lineWidth = dashed ? 2.5 : 2;
+    ctx.strokeStyle = stroke; ctx.lineWidth = width;
     if (dashed) ctx.setLineDash([8, 4]);
     ctx.stroke(); ctx.setLineDash([]);
   }
@@ -718,12 +808,26 @@ function drawMoveHandle(cx, cy, active) {
   ctx.restore();
 }
 
+function drawResizeHandle(x, y, active) {
+  ctx.beginPath(); ctx.arc(x, y, HANDLE_R, 0, Math.PI * 2);
+  ctx.fillStyle = active ? ROSE_STROKE : '#fff';
+  ctx.strokeStyle = ROSE_STROKE; ctx.lineWidth = 2;
+  ctx.fill(); ctx.stroke();
+}
+
 function drawLabel(text, cx, cy) {
-  ctx.font = '600 13px -apple-system,system-ui,sans-serif';
+  ctx.font = '700 13px -apple-system,system-ui,sans-serif';
   const w = ctx.measureText(text).width;
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.beginPath(); ctx.roundRect(cx - w / 2 - 6, cy - 10, w + 12, 20, 4); ctx.fill();
-  ctx.fillStyle = ROSE_LABEL;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.35)';
+  ctx.shadowBlur = 6;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath(); ctx.roundRect(cx - w / 2 - 7, cy - 11, w + 14, 22, 5); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = ZONE_SAVED_STROKE; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.roundRect(cx - w / 2 - 7, cy - 11, w + 14, 22, 5); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = ZONE_SAVED_STROKE;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(text, cx, cy);
 }
@@ -827,11 +931,18 @@ function loadZones() {
 // rules and zone assignments are used by live monitoring and demo analysis.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const RULE_LIBRARY = {
+const RULE_LIBRARY_MANUFACTURING = {
   'People':   ['Person enters the frame', 'Person loiters in view', 'Multiple people gathered', 'Person falls down', 'Person running'],
   'Objects':  ['Object left behind', 'Object removed from view', 'Unattended bag or package'],
   'Safety':   ['Person without a helmet', 'Smoke or fire detected', 'Door left open', 'Spill on the floor'],
   'Vehicles': ['Vehicle enters the driveway', 'Vehicle parked illegally', 'Vehicle reversing'],
+};
+
+const RULE_LIBRARY_OTHER = {
+  'Retail':      ['Queue too long', 'Shelf empty', 'Unattended counter'],
+  'Hospitality': ['Uncleared table', 'Pool unattended'],
+  'Vehicle':     ['Vehicle enters driveway', 'Illegal parking', 'Vehicle reversing'],
+  'Home':        ['Person at front door', 'Package delivered unattended'],
 };
 
 function loadRules() {
@@ -957,14 +1068,12 @@ document.getElementById('ruleInput').addEventListener('keydown', (e) => {
 });
 
 // rule library dropdown overlay
-function renderRuleLibrary() {
-  const lib = document.getElementById('ruleLibrary');
-  lib.innerHTML = '';
-  Object.entries(RULE_LIBRARY).forEach(([cat, items]) => {
+function appendLibraryCategories(container, categories) {
+  Object.entries(categories).forEach(([cat, items]) => {
     const h = document.createElement('div');
     h.className = 'library-category';
     h.textContent = cat;
-    lib.appendChild(h);
+    container.appendChild(h);
     items.forEach(text => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -974,9 +1083,53 @@ function renderRuleLibrary() {
         addRule(text, document.getElementById('zoneSelect').value);
         toggleRuleLibrary(false);
       });
-      lib.appendChild(b);
+      container.appendChild(b);
     });
   });
+}
+
+function renderRuleLibrary() {
+  const lib = document.getElementById('ruleLibrary');
+  lib.innerHTML = '';
+
+  // section 1 — Smart Manufacturing, expanded by default
+  const mfgSection = document.createElement('div');
+  mfgSection.className = 'library-section';
+  const mfgTitle = document.createElement('div');
+  mfgTitle.className = 'library-section-title';
+  mfgTitle.textContent = 'Smart Manufacturing';
+  mfgSection.appendChild(mfgTitle);
+  appendLibraryCategories(mfgSection, RULE_LIBRARY_MANUFACTURING);
+  lib.appendChild(mfgSection);
+
+  // section 2 — Other Use Cases, collapsed by default behind "Show more"
+  const otherSection = document.createElement('div');
+  otherSection.className = 'library-section';
+
+  const showMoreBtn = document.createElement('button');
+  showMoreBtn.type = 'button';
+  showMoreBtn.className = 'library-show-more';
+  showMoreBtn.textContent = 'Show more';
+
+  const collapse = document.createElement('div');
+  collapse.className = 'library-collapse';
+  collapse.id = 'libraryOtherCollapse';
+
+  const otherTitle = document.createElement('div');
+  otherTitle.className = 'library-section-title';
+  otherTitle.textContent = 'Other Use Cases';
+  collapse.appendChild(otherTitle);
+  appendLibraryCategories(collapse, RULE_LIBRARY_OTHER);
+
+  showMoreBtn.addEventListener('click', () => {
+    const expanded = collapse.classList.toggle('expanded');
+    showMoreBtn.textContent = expanded ? 'Show less' : 'Show more';
+    collapse.style.maxHeight = expanded ? collapse.scrollHeight + 'px' : '0px';
+  });
+
+  otherSection.appendChild(showMoreBtn);
+  otherSection.appendChild(collapse);
+  lib.appendChild(otherSection);
 }
 
 function toggleRuleLibrary(force) {

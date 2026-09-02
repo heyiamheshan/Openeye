@@ -32,31 +32,34 @@
         <div class="camera-overlay" id="cameraOverlay">
           <span>Camera unavailable</span>
         </div>
+
+        <!-- zone-drawing toolbar: overlaid on the feed, visible only while drawing -->
+        <div class="draw-toolbar" id="drawToolbar" hidden>
+          <div class="shape-picker" id="shapePicker">
+            <label class="shape-option">
+              <input type="radio" name="drawMode" id="modeRect" value="rect" checked />
+              <span>Rectangle</span>
+            </label>
+            <label class="shape-option">
+              <input type="radio" name="drawMode" id="modePoly" value="poly" />
+              <span>Polygon</span>
+            </label>
+            <label class="shape-option">
+              <input type="radio" name="drawMode" id="modeCircle" value="circle" />
+              <span>Circle</span>
+            </label>
+          </div>
+          <span class="toolbar-hint" id="drawHint"></span>
+          <button type="button" class="btn-ghost btn-sm-w" id="cancelDrawBtn" onclick="cancelDraw()">Cancel</button>
+        </div>
       </div>
 
-      <!-- control bar: mode toggle · shape picker · hint · actions -->
+      <!-- control bar: mode toggle · actions -->
       <div class="control-bar">
         <div class="mode-toggle" id="feedModeToggle">
           <button type="button" class="mode-btn active" data-mode="live">Live</button>
           <button type="button" class="mode-btn" data-mode="demo">Demo</button>
         </div>
-
-        <div class="shape-picker" id="shapePicker" hidden>
-          <label class="shape-option">
-            <input type="radio" name="drawMode" id="modeRect" value="rect" checked />
-            <span>Rectangle</span>
-          </label>
-          <label class="shape-option">
-            <input type="radio" name="drawMode" id="modePoly" value="poly" />
-            <span>Polygon</span>
-          </label>
-          <label class="shape-option">
-            <input type="radio" name="drawMode" id="modeCircle" value="circle" />
-            <span>Circle</span>
-          </label>
-        </div>
-
-        <span class="toolbar-hint" id="drawHint"></span>
 
         <div class="control-actions">
           <button type="button" class="btn-ghost" id="drawZoneBtn" onclick="toggleDrawMode()">

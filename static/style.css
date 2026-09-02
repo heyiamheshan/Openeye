@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    OpenEye — style.css
-   Visual language: calm stone neutrals; rose #E11D48 is the only accent and
-   appears exclusively on the Start button, the monitoring status dot, alert
-   row left borders, zone chips, and zone polygon fills.
+   Visual language: calm stone neutrals; rose #E11D48 accents the Start
+   button, the monitoring status dot, and alert row left borders. Zones
+   (chips + polygon fills on the camera canvas) use red #DC2626 instead.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── tokens ────────────────────────────────────────────────────────────────── */
@@ -19,6 +19,10 @@
   --rose-dark:   #BE123C;
   --rose-50:     #FFF1F2;
   --rose-300:    #FDA4AF;
+  --zone-red:      #DC2626;
+  --zone-red-dark: #991B1B;
+  --zone-red-50:   #FEF2F2;
+  --zone-red-300:  #FCA5A5;
   --radius:      8px;
   --radius-sm:   6px;
   --radius-xs:   4px;
@@ -272,6 +276,27 @@ button {
   text-align: right;
 }
 
+/* zone-drawing toolbar — overlaid on the camera feed, visible only while drawing */
+.draw-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 6px 10px;
+  background: #FFFFFF;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  z-index: 10;
+}
+
+.draw-toolbar .toolbar-hint {
+  text-align: left;
+}
+
 .control-actions {
   display: flex;
   gap: 8px;
@@ -448,17 +473,17 @@ button {
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  background: var(--rose-50);
+  background: var(--zone-red-50);
   border: 1px solid transparent;
   border-radius: var(--radius-xs);
   font-size: 12px;
-  color: var(--rose-dark);
+  color: var(--zone-red-dark);
 }
 
 .chip-name {
   font-size: 13px;
   font-weight: 500;
-  color: var(--rose);
+  color: var(--zone-red);
   white-space: nowrap;
 }
 
@@ -481,19 +506,18 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  font-size: 14px;
+  width: 18px;
+  height: 18px;
+  font-size: 15px;
   line-height: 1;
-  color: var(--text-3);
+  color: var(--zone-red-dark);
   background: none;
   border: none;
-  border-radius: var(--radius-xs);
-  opacity: 0;
+  border-radius: 99px;
+  opacity: 0.6;
 }
 
-.zone-chip:hover .chip-del { opacity: 1; }
-.chip-del:hover { color: var(--text); }
+.chip-del:hover { opacity: 1; background: rgba(220, 38, 38, 0.12); color: var(--zone-red); }
 
 /* inline delete confirmation — chip expands in place */
 .chip-confirm {
@@ -505,13 +529,13 @@ button {
 
 .chip-confirm-text {
   font-size: 12px;
-  color: var(--text);
-  font-weight: 500;
+  color: var(--zone-red-dark);
+  font-weight: 600;
 }
 
 .chip-confirm-yes,
 .chip-confirm-no {
-  padding: 2px 10px;
+  padding: 3px 11px;
   font-size: 12px;
   font-weight: 600;
   border-radius: var(--radius-xs);
@@ -519,11 +543,11 @@ button {
 
 .chip-confirm-yes {
   color: #FFFFFF;
-  background: var(--text);
+  background: var(--zone-red);
   border: none;
 }
 
-.chip-confirm-yes:hover { background: #33302C; }
+.chip-confirm-yes:hover { background: var(--zone-red-dark); }
 
 .chip-confirm-no {
   color: var(--text-2);
@@ -537,8 +561,9 @@ button {
 }
 
 .zone-chip.confirming {
-  background: var(--surface);
-  border-color: var(--border);
+  background: var(--zone-red-50);
+  border-color: var(--zone-red-300);
+  padding: 4px 8px;
 }
 
 .zone-chip.confirming .chip-name,
@@ -705,6 +730,46 @@ button {
 }
 
 .library-item:hover { background: var(--surface-2); }
+
+.library-section + .library-section { margin-top: 4px; }
+
+.library-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  padding: 8px 8px 4px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 4px;
+}
+
+.library-section:first-child .library-section-title {
+  border-top: none;
+  margin-top: 0;
+}
+
+.library-show-more {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rose);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-soft);
+}
+
+.library-show-more:hover { color: var(--rose-dark); }
+
+.library-collapse {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+}
 
 /* rules list — hairline rows */
 .rules-list {
