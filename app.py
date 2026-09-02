@@ -320,5 +320,74 @@ def remove_rule(rule_id):
     return jsonify(ok=True)
 
 
+@app.route("/incidents")
+def get_incidents_route():
+    since = request.args.get("since")
+    zone = request.args.get("zone")
+    severity = request.args.get("severity")
+    incidents = incident_log.get_incidents(since=since, zone=zone, severity=severity)
+    return jsonify(incidents=incidents)
+
+
+@app.route("/digest/stats")
+def digest_stats():
+    records = incident_log.get_recent(24)
+    return jsonify(ok=True, stats=incident_log.compute_stats(records))
+
+
+DIGEST_PROMPT_TEMPLATE = (
+    "You are a factory safety analyst. Below is a log of monitoring incidents from "
+    "the last 24 hours. Write a concise shift safety digest with exactly these "
+    "sections: 1) Summary — one sentence with the total count and overall "
+    "assessment. 2) Patterns — any clustering by zone, by time of day, or by rule "
+    "type, stated plainly. 3) Highest concern — the single most serious incident "
+    "and why. 4) Recommended action — two or three specific, practical actions a "
+    "supervisor could take tomorrow. Keep the whole digest under 200 words. Be "
+    "factual and do not speculate beyond what the log shows. Log follows: {log_text}"
+)
+
+
+@app.route("/digest/generate", methods=["POST"])
+def digest_generate():
+    records = incident_log.get_recent(24)
+    stats = incident_log.compute_stats(records)
+
+    if not records:
+        return jsonify(
+            ok=True,
+            message="No incidents recorded in the last 24 hours.",
+            digest=None,
+            stats=stats,
+        )
+
+    log_text = incident_log.build_digest_log_text(records)
+    prompt = DIGEST_PROMPT_TEMPLATE.format(log_text=log_text)
+
+    payload = {
+        "model": config.TEXT_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    headers = {
+        "Authorization": f"Bearer {config.DASHSCOPE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        try:
+            resp = requests.post(
+                f"{config.API_BASE_URL}/chat/completions", headers=headers, json=payload, timeout=30,
+            )
+        except requests.exceptions.SSLError:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            resp = requests.post(
+                f"{config.API_BASE_URL}/chat/completions", headers=headers, json=payload, timeout=30, verify=False,
+            )
+        resp.raise_for_status()
+        digest_text = resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception as exc:
+        return jsonify(error=f"Digest generation failed: {exc}", stats=stats), 502
+
+    return jsonify(ok=True, digest=digest_text, stats=stats)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, threaded=True)

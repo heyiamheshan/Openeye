@@ -186,6 +186,25 @@
         </div>
       </div>
 
+      <!-- shift digest card -->
+      <div class="card digest-card" id="digestCard">
+        <button type="button" class="digest-header" id="digestHeader">
+          <h2 class="card-title">Shift Digest</h2>
+          <span class="digest-summary-line" id="digestSummaryLine">Loading…</span>
+          <span class="digest-chevron" id="digestChevron">▾</span>
+        </button>
+
+        <div class="digest-body" id="digestBody" hidden>
+          <div class="digest-stats" id="digestStats"></div>
+
+          <button type="button" class="btn-rose btn-full" id="generateDigestBtn">Generate AI digest</button>
+
+          <div class="digest-result" id="digestResult" hidden></div>
+
+          <button type="button" class="btn-ghost btn-full" id="downloadDigestBtn" hidden>Download report</button>
+        </div>
+      </div>
+
     </aside>
   </main>
 

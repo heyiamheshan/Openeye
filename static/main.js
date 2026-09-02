@@ -1363,7 +1363,10 @@ function renderAlerts(alerts) {
     row.appendChild(body);
     frag.appendChild(row);
   });
-  if (frag.childNodes.length > 0) list.insertBefore(frag, list.firstChild);
+  if (frag.childNodes.length > 0) {
+    list.insertBefore(frag, list.firstChild);
+    if (typeof loadDigestStats === 'function') loadDigestStats();
+  }
 }
 
 const PPE_STATUS_LABEL = { present: 'Present', missing: 'Missing', not_visible: 'Not visible' };
@@ -1477,6 +1480,201 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// SHIFT DIGEST — collapsed-by-default card: /digest/stats for the summary line
+// and expanded stat list, /digest/generate for the on-demand AI text digest.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const digestHeaderEl      = document.getElementById('digestHeader');
+const digestBodyEl        = document.getElementById('digestBody');
+const digestChevronEl     = document.getElementById('digestChevron');
+const digestSummaryLineEl = document.getElementById('digestSummaryLine');
+const digestStatsEl       = document.getElementById('digestStats');
+const generateDigestBtn   = document.getElementById('generateDigestBtn');
+const digestResultEl      = document.getElementById('digestResult');
+const downloadDigestBtn   = document.getElementById('downloadDigestBtn');
+
+let latestDigestStats = null;
+let latestDigestText  = null;
+
+const SEVERITY_DOT_CLASS = { high: 'severity-dot-high', medium: 'severity-dot-medium', low: 'severity-dot-low' };
+const SEVERITY_LABEL     = { high: 'High', medium: 'Medium', low: 'Low' };
+
+function loadDigestStats() {
+  fetch('/digest/stats').then(r => r.json()).then(d => {
+    if (!d.ok) return;
+    latestDigestStats = d.stats;
+    const total = d.stats.total || 0;
+    digestSummaryLineEl.textContent = `${total} incident${total === 1 ? '' : 's'} in the last 24 hours`;
+    if (!digestBodyEl.hidden) renderDigestStats(latestDigestStats);
+  }).catch(() => {
+    digestSummaryLineEl.textContent = 'Stats unavailable';
+  });
+}
+
+function renderDigestStats(stats) {
+  digestStatsEl.innerHTML = '';
+  if (!stats || stats.total === 0) {
+    const p = document.createElement('p');
+    p.className = 'digest-empty';
+    p.textContent = 'No incidents logged in the last 24 hours.';
+    digestStatsEl.appendChild(p);
+    return;
+  }
+
+  const zoneBlock = document.createElement('div');
+  zoneBlock.className = 'digest-stat-block';
+  const zoneTitle = document.createElement('div');
+  zoneTitle.className = 'digest-stat-title';
+  zoneTitle.textContent = 'By zone';
+  zoneBlock.appendChild(zoneTitle);
+  Object.entries(stats.by_zone || {}).forEach(([zone, count]) => {
+    const row = document.createElement('div');
+    row.className = 'digest-stat-row';
+    row.innerHTML = `<span>${escapeHtml(zone)}</span><span>${count}</span>`;
+    zoneBlock.appendChild(row);
+  });
+  digestStatsEl.appendChild(zoneBlock);
+
+  const sevBlock = document.createElement('div');
+  sevBlock.className = 'digest-stat-block';
+  const sevTitle = document.createElement('div');
+  sevTitle.className = 'digest-stat-title';
+  sevTitle.textContent = 'By severity';
+  sevBlock.appendChild(sevTitle);
+  ['high', 'medium', 'low'].forEach(sev => {
+    const count = (stats.by_severity || {})[sev] || 0;
+    const row = document.createElement('div');
+    row.className = 'digest-stat-row';
+    const label = document.createElement('span');
+    label.className = 'digest-severity-label';
+    const dot = document.createElement('span');
+    dot.className = `severity-dot ${SEVERITY_DOT_CLASS[sev]}`;
+    label.appendChild(dot);
+    label.appendChild(document.createTextNode(SEVERITY_LABEL[sev]));
+    const countEl = document.createElement('span');
+    countEl.textContent = count;
+    row.appendChild(label);
+    row.appendChild(countEl);
+    sevBlock.appendChild(row);
+  });
+  digestStatsEl.appendChild(sevBlock);
+
+  const hourBlock = document.createElement('div');
+  hourBlock.className = 'digest-stat-block';
+  hourBlock.innerHTML =
+    `<div class="digest-stat-title">Busiest hour</div>` +
+    `<div class="digest-stat-row"><span>${stats.busiest_hour ? escapeHtml(stats.busiest_hour) : '—'}</span></div>`;
+  digestStatsEl.appendChild(hourBlock);
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+digestHeaderEl.addEventListener('click', () => {
+  const expanding = digestBodyEl.hidden;
+  digestBodyEl.hidden = !expanding;
+  digestChevronEl.textContent = expanding ? '▴' : '▾';
+  if (expanding && latestDigestStats) renderDigestStats(latestDigestStats);
+});
+
+function renderDigestText(text) {
+  // strip any markdown bold the model added, then bold exactly the four
+  // numbered section headers ourselves ("1) Summary", "2) Patterns", …)
+  const plain = text.replace(/\*\*/g, '');
+  const escaped = escapeHtml(plain);
+  const withHeaders = escaped.replace(
+    /(^|\n)\s*(\d\)\s*[A-Za-z ]+?)(\s*[—:-])/g,
+    (match, pre, header, sep) => `${pre}<strong>${header}</strong>${sep}`
+  );
+  digestResultEl.innerHTML = withHeaders.replace(/\n/g, '<br>');
+}
+
+generateDigestBtn.addEventListener('click', () => {
+  generateDigestBtn.disabled = true;
+  generateDigestBtn.textContent = 'Generating…';
+  digestResultEl.hidden = true;
+
+  fetch('/digest/generate', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      generateDigestBtn.disabled = false;
+      generateDigestBtn.textContent = 'Generate AI digest';
+
+      if (d.stats) {
+        latestDigestStats = d.stats;
+        renderDigestStats(latestDigestStats);
+      }
+
+      if (d.message && !d.digest) {
+        digestResultEl.hidden = false;
+        digestResultEl.textContent = d.message;
+        latestDigestText = null;
+        downloadDigestBtn.hidden = true;
+        return;
+      }
+
+      if (!d.ok) {
+        digestResultEl.hidden = false;
+        digestResultEl.textContent = d.error || 'Failed to generate digest.';
+        latestDigestText = null;
+        downloadDigestBtn.hidden = true;
+        return;
+      }
+
+      latestDigestText = d.digest;
+      digestResultEl.hidden = false;
+      renderDigestText(d.digest);
+      downloadDigestBtn.hidden = false;
+    })
+    .catch(() => {
+      generateDigestBtn.disabled = false;
+      generateDigestBtn.textContent = 'Generate AI digest';
+      digestResultEl.hidden = false;
+      digestResultEl.textContent = 'Failed to generate digest.';
+    });
+});
+
+function digestReportFilename() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `openeye-digest-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.txt`;
+}
+
+downloadDigestBtn.addEventListener('click', () => {
+  if (!latestDigestText) return;
+  const stats = latestDigestStats || {};
+  const lines = [
+    'OpenEye Shift Digest',
+    new Date().toString(),
+    '',
+    latestDigestText,
+    '',
+    '--- Statistics (last 24 hours) ---',
+    `Total incidents: ${stats.total || 0}`,
+    '',
+    'By zone:',
+    ...Object.entries(stats.by_zone || {}).map(([z, c]) => `  ${z}: ${c}`),
+    '',
+    'By severity:',
+    ...['high', 'medium', 'low'].map(s => `  ${SEVERITY_LABEL[s]}: ${(stats.by_severity || {})[s] || 0}`),
+    '',
+    `Busiest hour: ${stats.busiest_hour || '—'}`,
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = digestReportFilename();
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // INIT
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -1484,4 +1682,5 @@ renderRuleLibrary();
 renderDemoSources();
 loadZones();
 loadRules();
+loadDigestStats();
 startPolling();
