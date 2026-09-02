@@ -6,7 +6,8 @@ from pathlib import Path
 import cv2
 
 import config
-from detector import _evaluate_rule, resize_and_encode
+import zones_store
+from detector import _draw_zone_overlay, _evaluate_rule
 
 TARGET_FRAMES = 30
 MAX_FRAMES = 40
@@ -98,17 +99,11 @@ class DemoRunThread(threading.Thread):
                     self.current_index = i
                     self._current_rule_label = rule_label
 
-                b64 = resize_and_encode(raw_bytes)
-
-                ts = datetime.now()
-                filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-                (Path(config.ALERTS_DIR) / filename).write_bytes(raw_bytes)
-
                 max_workers = min(len(self.rules), config.MAX_PARALLEL_RULES)
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
                         executor.submit(
-                            _evaluate_rule, r["rule_text"], r.get("zone_name"), b64
+                            _evaluate_rule, r["rule_text"], r.get("zone_name"), raw_bytes
                         ): r
                         for r in self.rules
                     }
@@ -121,6 +116,17 @@ class DemoRunThread(threading.Thread):
                             continue
 
                         if result.get("triggered", False):
+                            ts = datetime.now()
+                            filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+
+                            zone_name = rule_entry.get("zone_name")
+                            zone_points = zones_store.get_zones().get(zone_name) if zone_name else None
+                            evidence_bytes = (
+                                _draw_zone_overlay(raw_bytes, zone_points)
+                                if zone_points else raw_bytes
+                            )
+                            (Path(config.ALERTS_DIR) / filename).write_bytes(evidence_bytes)
+
                             alert = {
                                 "id": filename,
                                 "timestamp": ts.isoformat(timespec="seconds"),

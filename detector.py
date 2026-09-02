@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import requests
 import urllib3
-from PIL import Image
+from PIL import Image, ImageDraw
 
 import config
 import rules_store
@@ -123,8 +123,7 @@ def fetch_frame() -> bytes:
         cap.release()
 
 
-def resize_and_encode(image_bytes: bytes) -> str:
-    img = Image.open(BytesIO(image_bytes)).convert("RGB")
+def _encode_image(img: Image.Image) -> str:
     w, h = img.size
     long_side = max(w, h)
     if long_side > config.MAX_LONG_SIDE:
@@ -135,26 +134,69 @@ def resize_and_encode(image_bytes: bytes) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def analyze_frame(b64_image: str, rule_text: str, zone_name: str | None = None) -> dict:
-    """Evaluates a single rule against a frame. If zone_name is given, the rule
-    is scoped to that zone's polygon only (looked up fresh from zones_store) —
-    activity elsewhere in the frame should not trigger it."""
-    zone_points = zones_store.get_zones().get(zone_name) if zone_name else None
+def resize_and_encode(image_bytes: bytes) -> str:
+    img = Image.open(BytesIO(image_bytes)).convert("RGB")
+    return _encode_image(img)
 
-    prompt = (
-        f"Rule: {rule_text}. "
-        "Does this frame violate the rule? "
-        'Respond ONLY with JSON: {"triggered": true or false, '
-        '"explanation": "one sentence", "confidence": 0.0 to 1.0, '
-        '"bbox": [x1,y1,x2,y2] or null (normalised 0-1 coordinates of the '
-        "relevant person/object, or null if none)}"
-    )
+
+def _crop_to_zone(img: Image.Image, zone_points: list):
+    """Crops to the bounding rectangle of the zone polygon (in pixel space).
+    Returns (cropped_image, crop_rect_norm) where crop_rect_norm is the crop's
+    (x1,y1,x2,y2) in full-frame normalised 0-1 coordinates, used later to map
+    a bbox the model returns (relative to the crop) back to full-frame space."""
+    w, h = img.size
+    xs = [p[0] * w for p in zone_points]
+    ys = [p[1] * h for p in zone_points]
+    x1, x2 = max(0, min(xs)), min(w, max(xs))
+    y1, y2 = max(0, min(ys)), min(h, max(ys))
+    x1i, y1i = int(x1), int(y1)
+    x2i, y2i = max(x1i + 1, int(x2)), max(y1i + 1, int(y2))
+    cropped = img.crop((x1i, y1i, x2i, y2i))
+    crop_rect_norm = (x1i / w, y1i / h, x2i / w, y2i / h)
+    return cropped, crop_rect_norm
+
+
+def _draw_zone_overlay(raw_bytes: bytes, zone_points: list) -> bytes:
+    """Draws the zone polygon onto the FULL frame for the saved evidence image."""
+    img = Image.open(BytesIO(raw_bytes)).convert("RGB")
+    w, h = img.size
+    draw = ImageDraw.Draw(img)
+    pts = [(p[0] * w, p[1] * h) for p in zone_points]
+    draw.line(pts + [pts[0]], fill=(245, 158, 11), width=4)
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+def analyze_frame(raw_bytes: bytes, rule_text: str, zone_name: str | None = None) -> dict:
+    """Evaluates a single rule against a frame. If zone_name is given, the rule
+    is scoped to that zone's polygon only (looked up fresh from zones_store):
+    the image sent to the model is CROPPED to the zone's bounding rectangle so
+    it cannot see or describe anything outside it."""
+    zone_points = zones_store.get_zones().get(zone_name) if zone_name else None
+    crop_rect_norm = None
+
     if zone_points:
-        prompt += (
-            f" This rule applies only to the zone '{zone_name}', defined by polygon "
-            f"points {zone_points} (normalised 0-1 coordinates). Only consider "
-            "activity inside this zone when deciding whether to trigger; ignore "
-            "activity elsewhere in the frame."
+        img = Image.open(BytesIO(raw_bytes)).convert("RGB")
+        cropped_img, crop_rect_norm = _crop_to_zone(img, zone_points)
+        b64_image = _encode_image(cropped_img)
+        prompt = (
+            f"You are looking at a cropped image showing ONLY the contents of a "
+            f"monitored zone called '{zone_name}'. Ignore anything outside this zone. "
+            f"Rule: {rule_text}. Does this cropped zone image violate the rule? "
+            'Respond ONLY with JSON: {"triggered": true or false, '
+            '"explanation": "one sentence about what you see INSIDE THIS ZONE ONLY", '
+            '"confidence": 0.0 to 1.0, "bbox": [x1,y1,x2,y2] or null}'
+        )
+    else:
+        b64_image = resize_and_encode(raw_bytes)
+        prompt = (
+            f"Rule: {rule_text}. "
+            "Does this frame violate the rule? "
+            'Respond ONLY with JSON: {"triggered": true or false, '
+            '"explanation": "one sentence", "confidence": 0.0 to 1.0, '
+            '"bbox": [x1,y1,x2,y2] or null (normalised 0-1 coordinates of the '
+            "relevant person/object, or null if none)}"
         )
     payload = {
         "model": config.MODEL,
@@ -197,6 +239,19 @@ def analyze_frame(b64_image: str, rule_text: str, zone_name: str | None = None) 
 
     triggered = result.get("triggered", False)
     bbox = _normalize_bbox(result.get("bbox"), b64_image)
+
+    if bbox and crop_rect_norm:
+        # bbox is relative to the cropped image — map it back into full-frame
+        # normalised coordinates so it can be compared against the zone polygon
+        cx1, cy1, cx2, cy2 = crop_rect_norm
+        bx1, by1, bx2, by2 = bbox
+        bbox = [
+            cx1 + bx1 * (cx2 - cx1),
+            cy1 + by1 * (cy2 - cy1),
+            cx1 + bx2 * (cx2 - cx1),
+            cy1 + by2 * (cy2 - cy1),
+        ]
+
     position_unverified = False
 
     if not triggered:
@@ -240,13 +295,13 @@ def parse_response(raw: str) -> dict:
     return json.loads(cleaned)
 
 
-def _evaluate_rule(rule_text: str, zone_name: str | None, b64_image: str) -> dict:
+def _evaluate_rule(rule_text: str, zone_name: str | None, raw_bytes: bytes) -> dict:
     """Runs in a worker thread — logs start/finish with millisecond timestamps
     so overlapping runs are visible in the terminal as proof of parallelism."""
     start_label = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     zone_label = f" zone='{zone_name}'" if zone_name else ""
     print(f"[{start_label}] START  rule='{rule_text}'{zone_label}")
-    result = analyze_frame(b64_image, rule_text, zone_name)
+    result = analyze_frame(raw_bytes, rule_text, zone_name)
     finish_label = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     print(f"[{finish_label}] FINISH rule='{rule_text}'{zone_label} triggered={result.get('triggered')}")
     return result
@@ -298,19 +353,11 @@ class DetectorThread(threading.Thread):
                         enabled_rules = [{"id": None, "rule_text": self.rule, "zone_name": None}]
 
                     if enabled_rules:
-                        b64 = resize_and_encode(raw_bytes)
-
-                        # save the evidence frame once — every rule that fires
-                        # this cycle shares the same saved frame path
-                        ts = datetime.now()
-                        filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-                        (Path(config.ALERTS_DIR) / filename).write_bytes(raw_bytes)
-
                         max_workers = min(len(enabled_rules), config.MAX_PARALLEL_RULES)
                         with ThreadPoolExecutor(max_workers=max_workers) as executor:
                             futures = {
                                 executor.submit(
-                                    _evaluate_rule, r["rule_text"], r.get("zone_name"), b64
+                                    _evaluate_rule, r["rule_text"], r.get("zone_name"), raw_bytes
                                 ): r
                                 for r in enabled_rules
                             }
@@ -323,6 +370,19 @@ class DetectorThread(threading.Thread):
                                     continue
 
                                 if result.get("triggered", False):
+                                    ts = datetime.now()
+                                    filename = f"{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+
+                                    # evidence is always the FULL frame — with the
+                                    # zone polygon drawn on it if this rule has one
+                                    zone_name = rule_entry.get("zone_name")
+                                    zone_points = zones_store.get_zones().get(zone_name) if zone_name else None
+                                    evidence_bytes = (
+                                        _draw_zone_overlay(raw_bytes, zone_points)
+                                        if zone_points else raw_bytes
+                                    )
+                                    (Path(config.ALERTS_DIR) / filename).write_bytes(evidence_bytes)
+
                                     alert = {
                                         "id": filename,
                                         "timestamp": ts.isoformat(timespec="seconds"),
