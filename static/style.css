@@ -914,7 +914,7 @@ button {
   transition: background 100ms;
 }
 
-.rule-row:last-child { border-bottom: none; }
+.rule-item:last-child .rule-row { border-bottom: none; }
 
 .rule-row:hover { background: var(--bg); }
 
@@ -944,14 +944,77 @@ button {
   max-width: 110px;
   padding: 2px 8px;
   font-size: 11px;
-  font-weight: 500;
-  color: var(--text-2);
-  background: var(--surface-2);
+  font-weight: 600;
+  color: var(--zone-red-dark);
+  background: var(--zone-red-50);
   border-radius: 99px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.rule-zone-whole {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.rule-edit-zone {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+.rule-edit-zone:hover { color: var(--text); background: var(--surface-2); }
+
+.rule-zone-editor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 8px 26px;
+}
+
+.rule-zone-editor select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+.rule-zone-save,
+.rule-zone-cancel {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-xs);
+}
+
+.rule-zone-save {
+  color: #FFFFFF;
+  background: var(--zone-red);
+  border: none;
+}
+
+.rule-zone-save:hover { background: var(--zone-red-dark); }
+
+.rule-zone-cancel {
+  color: var(--text-2);
+  background: none;
+  border: 1px solid var(--border);
+}
+
+.rule-zone-cancel:hover { color: var(--text); background: var(--surface-2); }
 
 .rule-zone-warning {
   flex-shrink: 0;
@@ -1010,6 +1073,12 @@ button {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.alerts-context-label {
+  margin: -4px 0 8px;
+  font-size: 12px;
+  color: var(--text-3);
 }
 
 .alert-count {

@@ -59,6 +59,18 @@ def add_rule(
         return rule
 
 
+def set_zone(rule_id: str, zone_name: str | None) -> dict | None:
+    with _lock:
+        rules = _load()
+        for r in rules:
+            if r["id"] == rule_id:
+                r["zone_name"] = zone_name
+                r["zone_name_cleared"] = False
+                _save(rules)
+                return r
+        return None
+
+
 def set_enabled(rule_id: str, enabled: bool) -> bool:
     with _lock:
         rules = _load()

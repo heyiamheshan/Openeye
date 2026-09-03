@@ -80,27 +80,37 @@ class DemoRunThread(threading.Thread):
                 self.total = len(indices)
 
             rule_label = ", ".join(r["rule_text"] for r in self.rules)
+            analysed = 0
 
-            for i, idx in enumerate(indices, start=1):
+            for idx in indices:
                 if self.cancelled:
                     break
 
                 cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ok, frame = cap.read()
                 if not ok:
+                    # unreadable frame (commonly the very last sampled index,
+                    # right at end-of-video) — skip silently and shrink the
+                    # reported total instead of logging an error or counting
+                    # it as an analysed, non-triggering frame
+                    with self._lock:
+                        self.total -= 1
                     continue
 
                 ok2, buf = cv2.imencode(".jpg", frame)
                 if not ok2:
+                    with self._lock:
+                        self.total -= 1
                     continue
                 raw_bytes = buf.tobytes()
 
+                analysed += 1
                 with self._lock:
                     self._current_frame = raw_bytes
-                    self.current_index = i
+                    self.current_index = analysed
                     self._current_rule_label = rule_label
 
-                print(f"[demo frame {i}/{len(indices)}] evaluating {len(self.rules)} rule(s):")
+                print(f"[demo frame {analysed}/{self.total}] evaluating {len(self.rules)} rule(s):")
                 for r in self.rules:
                     print(
                         f"    rule={r['rule_text']!r} zone={r.get('zone_name')!r} "
@@ -122,11 +132,11 @@ class DemoRunThread(threading.Thread):
                         try:
                             result = future.result()
                         except Exception as exc:
-                            print(f"[demo frame {i}] rule '{rule_entry['rule_text']}' ERROR: {exc}")
+                            print(f"[demo frame {analysed}] rule '{rule_entry['rule_text']}' ERROR: {exc}")
                             continue
 
                         print(
-                            f"[demo frame {i}] rule={rule_entry['rule_text']!r} "
+                            f"[demo frame {analysed}] rule={rule_entry['rule_text']!r} "
                             f"zone={rule_entry.get('zone_name')!r} "
                             f"triggered={result.get('triggered')} "
                             f"confidence={result.get('confidence')} "

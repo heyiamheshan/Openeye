@@ -46,7 +46,15 @@ def log_incident(alert: dict) -> dict:
 
 
 def _parse_ts(ts: str) -> datetime:
-    return datetime.fromisoformat(ts)
+    """Records are stored with naive local-time timestamps (datetime.now()).
+    A caller-supplied `since` value (e.g. the frontend's JS Date().toISOString(),
+    which is UTC and timezone-aware, ending in 'Z') would otherwise crash the
+    naive/aware comparison below — normalise any aware datetime to naive by
+    dropping tzinfo after converting to local time."""
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+    return dt
 
 
 def _load_all() -> list:

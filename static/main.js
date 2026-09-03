@@ -206,6 +206,8 @@ function setFeedMode(mode) {
     }
   }
   if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
+  if (typeof updateStartDisabled === 'function') updateStartDisabled();
+  if (typeof renderAlertsList === 'function') renderAlertsList();
 }
 
 document.querySelectorAll('#feedModeToggle .mode-btn').forEach(btn => {
@@ -242,13 +244,12 @@ function setDemoStatus(msg, isSummary) {
 function renderDemoSources() {
   const wrap = document.getElementById('demoSources');
   wrap.innerHTML = '';
-  const hasEnabledRule = rules.filter(r => r.enabled).length > 0;
 
   const sampleBtn = document.createElement('button');
   sampleBtn.type = 'button';
   sampleBtn.className = 'demo-src';
   sampleBtn.textContent = 'Use sample video';
-  sampleBtn.disabled = !hasEnabledRule || demoActive;
+  sampleBtn.disabled = demoActive;
   sampleBtn.addEventListener('click', useSampleVideo);
   wrap.appendChild(sampleBtn);
 
@@ -256,18 +257,9 @@ function renderDemoSources() {
   uploadBtn.type = 'button';
   uploadBtn.className = 'demo-src';
   uploadBtn.textContent = 'Upload video';
-  uploadBtn.disabled = !hasEnabledRule || demoActive;
+  uploadBtn.disabled = demoActive;
   uploadBtn.addEventListener('click', () => document.getElementById('demoVideoInput').click());
   wrap.appendChild(uploadBtn);
-
-  if (demoActive) {
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'demo-src active';
-    cancelBtn.textContent = 'Cancel analysis';
-    cancelBtn.addEventListener('click', cancelDemoRun);
-    wrap.appendChild(cancelBtn);
-  }
 
   if (!demoActive && demoRunCompleted) {
     const reportBtn = document.createElement('button');
@@ -282,21 +274,33 @@ function renderDemoSources() {
     });
     wrap.appendChild(reportBtn);
   }
+}
 
-  if (!hasEnabledRule && !demoActive) {
-    setDemoStatus('Add at least one enabled rule before selecting a video.');
-  }
+function onDemoVideoLoaded() {
+  demoVideoLoaded = true;
+  demoRunCompleted = false;
+  renderDemoSources();
+  if (typeof updateStartDisabled === 'function') updateStartDisabled();
+  loadDemoPreviewFrame();
+  setDemoStatus('Video loaded — add zones if needed, then click Start monitoring');
+}
+
+// draws a real frame from the loaded video onto the scene canvas so the
+// visible preview (and anything captured off it, e.g. freezeFeed) shows
+// actual content instead of the placeholder — before any run has started
+function loadDemoPreviewFrame() {
+  const img = new Image();
+  img.onload = () => sceneCtx.drawImage(img, 0, 0, DEMO_W, DEMO_H);
+  img.src = `/demo_run/current_frame?ts=${Date.now()}`;
 }
 
 function useSampleVideo() {
-  if (rules.filter(r => r.enabled).length === 0) return;
   setDemoStatus('Loading sample video…');
   fetch('/demo_run/load_sample', { method: 'POST' })
     .then(r => r.json())
     .then(d => {
       if (!d.ok) { setDemoStatus(d.error || 'Failed to load sample video'); return; }
-      demoVideoLoaded = true;
-      startDemoRun();
+      onDemoVideoLoaded();
     })
     .catch(() => setDemoStatus('Failed to load sample video'));
 }
@@ -313,13 +317,25 @@ document.getElementById('demoVideoInput').addEventListener('change', () => {
     .then(d => {
       input.value = '';
       if (!d.ok) { setDemoStatus(d.error || 'Upload failed'); return; }
-      demoVideoLoaded = true;
-      startDemoRun();
+      onDemoVideoLoaded();
     })
     .catch(() => setDemoStatus('Upload failed'));
 });
 
+// matches Python's datetime.now().isoformat(timespec="seconds") — naive local
+// time, no trailing 'Z'/offset — since incident records are stored the same
+// way and compared as naive datetimes server-side (Date().toISOString() is
+// UTC and timezone-aware, which crashed that comparison).
+function localIsoNow() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// only called from the main Start monitoring button while in demo mode
 function startDemoRun() {
+  if (!demoVideoLoaded || rules.filter(r => r.enabled).length === 0) return;
   fetch('/demo_run/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -330,7 +346,8 @@ function startDemoRun() {
       if (!d.ok) { setDemoStatus(d.error || 'Failed to start analysis'); return; }
       demoActive = true;
       demoRunCompleted = false;
-      demoRunStartedAt = new Date().toISOString();
+      demoRunStartedAt = localIsoNow();
+      setMonitoringUI(true, 'Analysing');
       if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
       renderDemoSources();
       document.getElementById('demoProgress').style.width = '0%';
@@ -350,17 +367,18 @@ function pollDemoRun() {
     const ruleSuffix = d.current_rule_label ? ` — Rule: ${d.current_rule_label}` : '';
     setDemoStatus(`Analysing frame ${d.current_index} of ${d.total}${ruleSuffix}`);
     demoFrameImg.src = `/demo_run/frame?ts=${Date.now()}`;
-    renderAlerts(d.alerts || []);
+    updateDemoAlerts(d.alerts || []);
 
     if (d.done) {
       clearInterval(demoPollInterval);
       demoPollInterval = null;
       demoActive = false;
       demoRunCompleted = true;
+      setMonitoringUI(false);
       renderDemoSources();
       if (typeof loadDigestStats === 'function') loadDigestStats();
       const alertCount = (d.alerts || []).length;
-      const ruleCount = new Set((d.alerts || []).map(a => a.rule)).size;
+      const ruleCount = d.rule_count || 0;
       setDemoStatus(
         `Analysed ${d.total} frame${d.total === 1 ? '' : 's'} — ` +
         `${alertCount} alert${alertCount === 1 ? '' : 's'} triggered across ` +
@@ -375,6 +393,7 @@ function cancelDemoRun() {
   fetch('/demo_run/cancel', { method: 'POST' }).then(() => {
     if (demoPollInterval) { clearInterval(demoPollInterval); demoPollInterval = null; }
     demoActive = false;
+    setMonitoringUI(false);
     renderDemoSources();
     setDemoStatus('Cancelled.');
   });
@@ -969,17 +988,17 @@ function loadZones() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const RULE_LIBRARY_MANUFACTURING = {
-  'People':   ['Person enters the frame', 'Person loiters in view', 'Multiple people gathered', 'Person falls down', 'Person running'],
-  'Objects':  ['Object left behind', 'Object removed from view', 'Unattended bag or package'],
-  'Safety':   ['Person without a helmet', 'Smoke or fire detected', 'Door left open', 'Spill on the floor'],
-  'Vehicles': ['Vehicle enters the driveway', 'Vehicle parked illegally', 'Vehicle reversing'],
+  'People':   ['Person present in the frame', 'Person loitering in view', 'Multiple people gathered', 'Person lying or collapsed on the floor', 'Person running'],
+  'Objects':  ['Object left behind', 'Object missing from view', 'Unattended bag or package'],
+  'Safety':   ['Person without a helmet', 'Smoke or fire visible', 'Door left open', 'Spill on the floor'],
+  'Vehicles': ['Vehicle present in the driveway', 'Vehicle parked illegally', 'Vehicle reversing'],
 };
 
 const RULE_LIBRARY_OTHER = {
   'Retail':      ['Queue too long', 'Shelf empty', 'Unattended counter'],
   'Hospitality': ['Uncleared table', 'Pool unattended'],
-  'Vehicle':     ['Vehicle enters driveway', 'Illegal parking', 'Vehicle reversing'],
-  'Home':        ['Person at front door', 'Package delivered unattended'],
+  'Vehicle':     ['Vehicle present in driveway', 'Illegal parking', 'Vehicle reversing'],
+  'Home':        ['Person at front door', 'Unattended package present at the door'],
 };
 
 function loadRules() {
@@ -1031,6 +1050,9 @@ function renderRules() {
     list.appendChild(p);
   }
   rules.forEach(r => {
+    const wrap = document.createElement('div');
+    wrap.className = 'rule-item';
+
     const row = document.createElement('div');
     row.className = 'rule-row' + (r.enabled ? '' : ' disabled');
 
@@ -1069,6 +1091,9 @@ function renderRules() {
       row.appendChild(pb);
     }
 
+    // zone assignment is always shown, immediately, so a null-zone save
+    // (e.g. the composer's dropdown not being what the user thought) is
+    // visible right away instead of silently evaluating the whole frame
     if (r.zone) {
       const zb = document.createElement('span');
       zb.className = 'rule-zone';
@@ -1081,7 +1106,19 @@ function renderRules() {
       wb.textContent = 'Zone deleted — whole frame';
       wb.title = 'Its assigned zone was deleted; this rule now evaluates the whole frame.';
       row.appendChild(wb);
+    } else {
+      const nb = document.createElement('span');
+      nb.className = 'rule-zone-whole';
+      nb.textContent = 'Whole frame';
+      row.appendChild(nb);
     }
+
+    const editZoneBtn = document.createElement('button');
+    editZoneBtn.type = 'button';
+    editZoneBtn.className = 'rule-edit-zone';
+    editZoneBtn.textContent = 'Edit zone';
+    editZoneBtn.title = 'Change zone assignment';
+    row.appendChild(editZoneBtn);
 
     const del = document.createElement('button');
     del.type = 'button';
@@ -1094,7 +1131,54 @@ function renderRules() {
     });
 
     row.appendChild(del);
-    list.appendChild(row);
+    wrap.appendChild(row);
+
+    // inline zone editor — hidden until "Edit zone" is clicked
+    const editorRow = document.createElement('div');
+    editorRow.className = 'rule-zone-editor';
+    editorRow.hidden = true;
+
+    const zoneSel = document.createElement('select');
+    const wholeOpt = document.createElement('option');
+    wholeOpt.value = '';
+    wholeOpt.textContent = 'Whole frame';
+    zoneSel.appendChild(wholeOpt);
+    Object.keys(savedZones).forEach(name => {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = name;
+      zoneSel.appendChild(o);
+    });
+    zoneSel.value = r.zone && savedZones[r.zone] ? r.zone : '';
+
+    const saveZoneBtn = document.createElement('button');
+    saveZoneBtn.type = 'button';
+    saveZoneBtn.className = 'rule-zone-save';
+    saveZoneBtn.textContent = 'Save';
+    saveZoneBtn.addEventListener('click', () => {
+      fetch(`/rules/${encodeURIComponent(r.id)}/zone`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone_name: zoneSel.value || null }),
+      })
+        .then(resp => resp.json())
+        .then(d => { if (d.ok) loadRules(); });
+    });
+
+    const cancelZoneBtn = document.createElement('button');
+    cancelZoneBtn.type = 'button';
+    cancelZoneBtn.className = 'rule-zone-cancel';
+    cancelZoneBtn.textContent = 'Cancel';
+    cancelZoneBtn.addEventListener('click', () => { editorRow.hidden = true; });
+
+    editorRow.appendChild(zoneSel);
+    editorRow.appendChild(saveZoneBtn);
+    editorRow.appendChild(cancelZoneBtn);
+    wrap.appendChild(editorRow);
+
+    editZoneBtn.addEventListener('click', () => { editorRow.hidden = !editorRow.hidden; });
+
+    list.appendChild(wrap);
   });
   syncZoneSelect();
 }
@@ -1291,18 +1375,35 @@ document.addEventListener('click', (e) => {
 // MONITORING + ALERTS
 // ═════════════════════════════════════════════════════════════════════════════
 
-let knownIds     = new Set();
 let pollInterval = null;
 
 function updateStartDisabled() {
   if (monitoringActive) return;
-  document.getElementById('startBtn').disabled = rules.filter(r => r.enabled).length === 0;
+  const startBtn = document.getElementById('startBtn');
+  const hasRule = rules.filter(r => r.enabled).length > 0;
+
+  if (feedMode === 'demo') {
+    const missing = [];
+    if (!demoVideoLoaded) missing.push('a video');
+    if (!hasRule) missing.push('an enabled rule');
+    startBtn.disabled = missing.length > 0;
+    startBtn.dataset.tip = missing.length > 0
+      ? `Add ${missing.join(' and ')} before starting analysis`
+      : '';
+  } else {
+    startBtn.disabled = !hasRule;
+    startBtn.dataset.tip = 'Add at least one enabled rule to start monitoring';
+  }
 }
 
 // the backend's DetectorThread pulls enabled rules (with their own zone scoping)
 // straight from the shared rules_store every cycle — the "rule" field here is
 // just a required non-empty placeholder for the /start endpoint.
 function startMonitoring() {
+  if (feedMode === 'demo') {
+    startDemoRun();
+    return;
+  }
   if (rules.filter(r => r.enabled).length === 0) return;
   fetch('/start', {
     method: 'POST',
@@ -1312,15 +1413,19 @@ function startMonitoring() {
 }
 
 function stopMonitoring() {
+  if (feedMode === 'demo') {
+    cancelDemoRun();
+    return;
+  }
   fetch('/stop', { method: 'POST' }).then(() => setMonitoringUI(false));
 }
 
-function setMonitoringUI(active) {
+function setMonitoringUI(active, label) {
   monitoringActive = active;
   document.getElementById('startBtn').hidden = active;
   document.getElementById('stopBtn').hidden = !active;
   document.getElementById('statusBadge').classList.toggle('active', active);
-  document.getElementById('statusLabel').textContent = active ? 'Monitoring' : 'Idle';
+  document.getElementById('statusLabel').textContent = active ? (label || 'Monitoring') : 'Idle';
   document.querySelector('.rules-card').classList.toggle('locked', active);
   if (!active) updateStartDisabled();
 }
@@ -1333,77 +1438,115 @@ function startPolling() {
 
 function pollAlerts() {
   fetch('/alerts/json').then(r => r.json()).then(data => {
-    // sync UI with backend state — monitoring may have been started/stopped elsewhere
-    setMonitoringUI(!!data.monitoring);
-    renderAlerts(data.alerts || []);
+    // sync UI with backend state — monitoring may have been started/stopped
+    // elsewhere. Skip this while a demo run is active: that has its own
+    // poll loop (pollDemoRun) driving the same Start/Stop button, and this
+    // live-mode poll would otherwise stomp it back to "Start" every 2s.
+    if (!demoActive) {
+      setMonitoringUI(!!data.monitoring);
+    }
+    updateLiveAlerts(data.alerts || []);
   }).catch(() => {});
 }
 
-function renderAlerts(alerts) {
+// separate alert histories per mode (Option A) — switching Live/Demo never
+// clears either array, it just changes which one is currently rendered
+let liveAlerts = [];
+let demoAlerts = [];
+
+function currentAlerts() {
+  return feedMode === 'demo' ? demoAlerts : liveAlerts;
+}
+
+function buildAlertRow(alert) {
+  const row = document.createElement('div');
+  row.className = 'alert-row';
+
+  const img = document.createElement('img');
+  img.className = 'alert-thumb';
+  img.src = alert.thumbnail;
+  img.alt = 'Alert frame';
+  img.loading = 'lazy';
+  img.addEventListener('click', () => openLightbox(alert));
+
+  const dl = document.createElement('button');
+  dl.type = 'button';
+  dl.className = 'alert-download';
+  dl.textContent = '⬇';
+  dl.title = 'Download image';
+  dl.addEventListener('click', (e) => { e.stopPropagation(); downloadAlertImage(alert); });
+
+  const body = document.createElement('div');
+  body.className = 'alert-body';
+
+  const expl = document.createElement('p');
+  expl.className = 'alert-explanation';
+  expl.textContent = alert.explanation || '';
+
+  body.appendChild(expl);
+
+  if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
+    body.appendChild(buildPpeChecklist(alert.items));
+  }
+
+  const meta = document.createElement('p');
+  meta.className = 'alert-meta';
+  if (alert.rule_type === 'proximity' && (alert.proximity === 'touching' || alert.proximity === 'very_close')) {
+    const badge = document.createElement('span');
+    badge.className = 'proximity-badge';
+    badge.textContent = alert.proximity === 'touching' ? 'TOUCHING' : 'VERY CLOSE';
+    meta.appendChild(badge);
+  }
+  meta.appendChild(document.createTextNode(alertMetaText(alert)));
+  body.appendChild(meta);
+  row.appendChild(img);
+  row.appendChild(dl);
+  row.appendChild(body);
+  return row;
+}
+
+// full rebuild from whichever array matches the current mode — cheap given
+// the small size of both lists (live keeps the backend's last 10; demo runs
+// rarely exceed ~40), and avoids any stale-DOM/id-dedup bugs across switches
+function renderAlertsList() {
   const list    = document.getElementById('alertsList');
   const empty   = document.getElementById('emptyState');
   const countEl = document.getElementById('alertCount');
+  const labelEl = document.getElementById('alertsContextLabel');
+
+  if (labelEl) labelEl.textContent = feedMode === 'demo' ? 'Demo run alerts' : 'Live monitoring alerts';
+
+  const alerts = currentAlerts();
   countEl.textContent = alerts.length;
-  if (alerts.length === 0 && !list.querySelector('.alert-row')) {
+
+  list.querySelectorAll('.alert-row').forEach(el => el.remove());
+
+  if (alerts.length === 0) {
     empty.style.display = '';
     return;
   }
   empty.style.display = 'none';
 
+  // live alerts arrive newest-first from the backend already; demo alerts
+  // accumulate oldest-first over the run — reverse so newest is always on
+  // top, consistent between modes
+  const displayOrder = feedMode === 'demo' ? alerts.slice().reverse() : alerts;
   const frag = document.createDocumentFragment();
-  alerts.forEach(alert => {
-    if (knownIds.has(alert.id)) return;
-    knownIds.add(alert.id);
+  displayOrder.forEach(alert => frag.appendChild(buildAlertRow(alert)));
+  list.appendChild(frag);
+}
 
-    const row = document.createElement('div');
-    row.className = 'alert-row';
-
-    const img = document.createElement('img');
-    img.className = 'alert-thumb';
-    img.src = alert.thumbnail;
-    img.alt = 'Alert frame';
-    img.loading = 'lazy';
-    img.addEventListener('click', () => openLightbox(alert));
-
-    const dl = document.createElement('button');
-    dl.type = 'button';
-    dl.className = 'alert-download';
-    dl.textContent = '⬇';
-    dl.title = 'Download image';
-    dl.addEventListener('click', (e) => { e.stopPropagation(); downloadAlertImage(alert); });
-
-    const body = document.createElement('div');
-    body.className = 'alert-body';
-
-    const expl = document.createElement('p');
-    expl.className = 'alert-explanation';
-    expl.textContent = alert.explanation || '';
-
-    body.appendChild(expl);
-
-    if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
-      body.appendChild(buildPpeChecklist(alert.items));
-    }
-
-    const meta = document.createElement('p');
-    meta.className = 'alert-meta';
-    if (alert.rule_type === 'proximity' && (alert.proximity === 'touching' || alert.proximity === 'very_close')) {
-      const badge = document.createElement('span');
-      badge.className = 'proximity-badge';
-      badge.textContent = alert.proximity === 'touching' ? 'TOUCHING' : 'VERY CLOSE';
-      meta.appendChild(badge);
-    }
-    meta.appendChild(document.createTextNode(alertMetaText(alert)));
-    body.appendChild(meta);
-    row.appendChild(img);
-    row.appendChild(dl);
-    row.appendChild(body);
-    frag.appendChild(row);
-  });
-  if (frag.childNodes.length > 0) {
-    list.insertBefore(frag, list.firstChild);
+function updateLiveAlerts(alerts) {
+  liveAlerts = alerts;
+  if (feedMode !== 'demo') {
+    renderAlertsList();
     if (typeof loadDigestStats === 'function') loadDigestStats();
   }
+}
+
+function updateDemoAlerts(alerts) {
+  demoAlerts = alerts;
+  if (feedMode === 'demo') renderAlertsList();
 }
 
 const PPE_STATUS_LABEL = { present: 'Present', missing: 'Missing', not_visible: 'Not visible' };
