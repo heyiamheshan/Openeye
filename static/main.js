@@ -207,6 +207,7 @@ function setFeedMode(mode) {
   }
   if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
   if (typeof updateStartDisabled === 'function') updateStartDisabled();
+  if (typeof renderAlertsList === 'function') renderAlertsList();
 }
 
 document.querySelectorAll('#feedModeToggle .mode-btn').forEach(btn => {
@@ -366,7 +367,7 @@ function pollDemoRun() {
     const ruleSuffix = d.current_rule_label ? ` — Rule: ${d.current_rule_label}` : '';
     setDemoStatus(`Analysing frame ${d.current_index} of ${d.total}${ruleSuffix}`);
     demoFrameImg.src = `/demo_run/frame?ts=${Date.now()}`;
-    renderAlerts(d.alerts || []);
+    updateDemoAlerts(d.alerts || []);
 
     if (d.done) {
       clearInterval(demoPollInterval);
@@ -1049,6 +1050,9 @@ function renderRules() {
     list.appendChild(p);
   }
   rules.forEach(r => {
+    const wrap = document.createElement('div');
+    wrap.className = 'rule-item';
+
     const row = document.createElement('div');
     row.className = 'rule-row' + (r.enabled ? '' : ' disabled');
 
@@ -1087,6 +1091,9 @@ function renderRules() {
       row.appendChild(pb);
     }
 
+    // zone assignment is always shown, immediately, so a null-zone save
+    // (e.g. the composer's dropdown not being what the user thought) is
+    // visible right away instead of silently evaluating the whole frame
     if (r.zone) {
       const zb = document.createElement('span');
       zb.className = 'rule-zone';
@@ -1099,7 +1106,19 @@ function renderRules() {
       wb.textContent = 'Zone deleted — whole frame';
       wb.title = 'Its assigned zone was deleted; this rule now evaluates the whole frame.';
       row.appendChild(wb);
+    } else {
+      const nb = document.createElement('span');
+      nb.className = 'rule-zone-whole';
+      nb.textContent = 'Whole frame';
+      row.appendChild(nb);
     }
+
+    const editZoneBtn = document.createElement('button');
+    editZoneBtn.type = 'button';
+    editZoneBtn.className = 'rule-edit-zone';
+    editZoneBtn.textContent = 'Edit zone';
+    editZoneBtn.title = 'Change zone assignment';
+    row.appendChild(editZoneBtn);
 
     const del = document.createElement('button');
     del.type = 'button';
@@ -1112,7 +1131,54 @@ function renderRules() {
     });
 
     row.appendChild(del);
-    list.appendChild(row);
+    wrap.appendChild(row);
+
+    // inline zone editor — hidden until "Edit zone" is clicked
+    const editorRow = document.createElement('div');
+    editorRow.className = 'rule-zone-editor';
+    editorRow.hidden = true;
+
+    const zoneSel = document.createElement('select');
+    const wholeOpt = document.createElement('option');
+    wholeOpt.value = '';
+    wholeOpt.textContent = 'Whole frame';
+    zoneSel.appendChild(wholeOpt);
+    Object.keys(savedZones).forEach(name => {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = name;
+      zoneSel.appendChild(o);
+    });
+    zoneSel.value = r.zone && savedZones[r.zone] ? r.zone : '';
+
+    const saveZoneBtn = document.createElement('button');
+    saveZoneBtn.type = 'button';
+    saveZoneBtn.className = 'rule-zone-save';
+    saveZoneBtn.textContent = 'Save';
+    saveZoneBtn.addEventListener('click', () => {
+      fetch(`/rules/${encodeURIComponent(r.id)}/zone`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone_name: zoneSel.value || null }),
+      })
+        .then(resp => resp.json())
+        .then(d => { if (d.ok) loadRules(); });
+    });
+
+    const cancelZoneBtn = document.createElement('button');
+    cancelZoneBtn.type = 'button';
+    cancelZoneBtn.className = 'rule-zone-cancel';
+    cancelZoneBtn.textContent = 'Cancel';
+    cancelZoneBtn.addEventListener('click', () => { editorRow.hidden = true; });
+
+    editorRow.appendChild(zoneSel);
+    editorRow.appendChild(saveZoneBtn);
+    editorRow.appendChild(cancelZoneBtn);
+    wrap.appendChild(editorRow);
+
+    editZoneBtn.addEventListener('click', () => { editorRow.hidden = !editorRow.hidden; });
+
+    list.appendChild(wrap);
   });
   syncZoneSelect();
 }
@@ -1309,7 +1375,6 @@ document.addEventListener('click', (e) => {
 // MONITORING + ALERTS
 // ═════════════════════════════════════════════════════════════════════════════
 
-let knownIds     = new Set();
 let pollInterval = null;
 
 function updateStartDisabled() {
@@ -1380,75 +1445,108 @@ function pollAlerts() {
     if (!demoActive) {
       setMonitoringUI(!!data.monitoring);
     }
-    renderAlerts(data.alerts || []);
+    updateLiveAlerts(data.alerts || []);
   }).catch(() => {});
 }
 
-function renderAlerts(alerts) {
+// separate alert histories per mode (Option A) — switching Live/Demo never
+// clears either array, it just changes which one is currently rendered
+let liveAlerts = [];
+let demoAlerts = [];
+
+function currentAlerts() {
+  return feedMode === 'demo' ? demoAlerts : liveAlerts;
+}
+
+function buildAlertRow(alert) {
+  const row = document.createElement('div');
+  row.className = 'alert-row';
+
+  const img = document.createElement('img');
+  img.className = 'alert-thumb';
+  img.src = alert.thumbnail;
+  img.alt = 'Alert frame';
+  img.loading = 'lazy';
+  img.addEventListener('click', () => openLightbox(alert));
+
+  const dl = document.createElement('button');
+  dl.type = 'button';
+  dl.className = 'alert-download';
+  dl.textContent = '⬇';
+  dl.title = 'Download image';
+  dl.addEventListener('click', (e) => { e.stopPropagation(); downloadAlertImage(alert); });
+
+  const body = document.createElement('div');
+  body.className = 'alert-body';
+
+  const expl = document.createElement('p');
+  expl.className = 'alert-explanation';
+  expl.textContent = alert.explanation || '';
+
+  body.appendChild(expl);
+
+  if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
+    body.appendChild(buildPpeChecklist(alert.items));
+  }
+
+  const meta = document.createElement('p');
+  meta.className = 'alert-meta';
+  if (alert.rule_type === 'proximity' && (alert.proximity === 'touching' || alert.proximity === 'very_close')) {
+    const badge = document.createElement('span');
+    badge.className = 'proximity-badge';
+    badge.textContent = alert.proximity === 'touching' ? 'TOUCHING' : 'VERY CLOSE';
+    meta.appendChild(badge);
+  }
+  meta.appendChild(document.createTextNode(alertMetaText(alert)));
+  body.appendChild(meta);
+  row.appendChild(img);
+  row.appendChild(dl);
+  row.appendChild(body);
+  return row;
+}
+
+// full rebuild from whichever array matches the current mode — cheap given
+// the small size of both lists (live keeps the backend's last 10; demo runs
+// rarely exceed ~40), and avoids any stale-DOM/id-dedup bugs across switches
+function renderAlertsList() {
   const list    = document.getElementById('alertsList');
   const empty   = document.getElementById('emptyState');
   const countEl = document.getElementById('alertCount');
+  const labelEl = document.getElementById('alertsContextLabel');
+
+  if (labelEl) labelEl.textContent = feedMode === 'demo' ? 'Demo run alerts' : 'Live monitoring alerts';
+
+  const alerts = currentAlerts();
   countEl.textContent = alerts.length;
-  if (alerts.length === 0 && !list.querySelector('.alert-row')) {
+
+  list.querySelectorAll('.alert-row').forEach(el => el.remove());
+
+  if (alerts.length === 0) {
     empty.style.display = '';
     return;
   }
   empty.style.display = 'none';
 
+  // live alerts arrive newest-first from the backend already; demo alerts
+  // accumulate oldest-first over the run — reverse so newest is always on
+  // top, consistent between modes
+  const displayOrder = feedMode === 'demo' ? alerts.slice().reverse() : alerts;
   const frag = document.createDocumentFragment();
-  alerts.forEach(alert => {
-    if (knownIds.has(alert.id)) return;
-    knownIds.add(alert.id);
+  displayOrder.forEach(alert => frag.appendChild(buildAlertRow(alert)));
+  list.appendChild(frag);
+}
 
-    const row = document.createElement('div');
-    row.className = 'alert-row';
-
-    const img = document.createElement('img');
-    img.className = 'alert-thumb';
-    img.src = alert.thumbnail;
-    img.alt = 'Alert frame';
-    img.loading = 'lazy';
-    img.addEventListener('click', () => openLightbox(alert));
-
-    const dl = document.createElement('button');
-    dl.type = 'button';
-    dl.className = 'alert-download';
-    dl.textContent = '⬇';
-    dl.title = 'Download image';
-    dl.addEventListener('click', (e) => { e.stopPropagation(); downloadAlertImage(alert); });
-
-    const body = document.createElement('div');
-    body.className = 'alert-body';
-
-    const expl = document.createElement('p');
-    expl.className = 'alert-explanation';
-    expl.textContent = alert.explanation || '';
-
-    body.appendChild(expl);
-
-    if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
-      body.appendChild(buildPpeChecklist(alert.items));
-    }
-
-    const meta = document.createElement('p');
-    meta.className = 'alert-meta';
-    if (alert.rule_type === 'proximity' && (alert.proximity === 'touching' || alert.proximity === 'very_close')) {
-      const badge = document.createElement('span');
-      badge.className = 'proximity-badge';
-      badge.textContent = alert.proximity === 'touching' ? 'TOUCHING' : 'VERY CLOSE';
-      meta.appendChild(badge);
-    }
-    meta.appendChild(document.createTextNode(alertMetaText(alert)));
-    body.appendChild(meta);
-    row.appendChild(img);
-    row.appendChild(dl);
-    row.appendChild(body);
-    frag.appendChild(row);
-  });
-  if (frag.childNodes.length > 0) {
-    list.insertBefore(frag, list.firstChild);
+function updateLiveAlerts(alerts) {
+  liveAlerts = alerts;
+  if (feedMode !== 'demo') {
+    renderAlertsList();
     if (typeof loadDigestStats === 'function') loadDigestStats();
   }
+}
+
+function updateDemoAlerts(alerts) {
+  demoAlerts = alerts;
+  if (feedMode === 'demo') renderAlertsList();
 }
 
 const PPE_STATUS_LABEL = { present: 'Present', missing: 'Missing', not_visible: 'Not visible' };

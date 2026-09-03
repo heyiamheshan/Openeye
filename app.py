@@ -349,6 +349,18 @@ def toggle_rule(rule_id):
     return jsonify(ok=True)
 
 
+@app.route("/rules/<path:rule_id>/zone", methods=["PUT"])
+def set_rule_zone(rule_id):
+    data = request.get_json(silent=True) or {}
+    zone_name = (data.get("zone_name") or "").strip() or None
+    if zone_name and zone_name not in zones_store.get_zones():
+        return jsonify(error="Unknown zone"), 400
+    updated = rules_store.set_zone(rule_id, zone_name)
+    if not updated:
+        return jsonify(error="Rule not found"), 404
+    return jsonify(ok=True, rule=updated)
+
+
 @app.route("/rules/<path:rule_id>", methods=["DELETE"])
 def remove_rule(rule_id):
     deleted = rules_store.delete_rule(rule_id)
@@ -390,7 +402,9 @@ DIGEST_PROMPT_TEMPLATE = (
     "escalating the language. Recommended actions must be general and practical, "
     "phrased as things a supervisor could reasonably do, not as compliance "
     "requirements. If there is only one incident, do not describe patterns — state "
-    "that there is insufficient data to identify a pattern."
+    "that there is insufficient data to identify a pattern. Do not refer to the "
+    "monitoring system as a sensor or use sensor-related terminology — it is an "
+    "AI camera monitoring system."
 )
 
 
