@@ -206,6 +206,7 @@ function setFeedMode(mode) {
     }
   }
   if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
+  if (typeof updateStartDisabled === 'function') updateStartDisabled();
 }
 
 document.querySelectorAll('#feedModeToggle .mode-btn').forEach(btn => {
@@ -242,13 +243,12 @@ function setDemoStatus(msg, isSummary) {
 function renderDemoSources() {
   const wrap = document.getElementById('demoSources');
   wrap.innerHTML = '';
-  const hasEnabledRule = rules.filter(r => r.enabled).length > 0;
 
   const sampleBtn = document.createElement('button');
   sampleBtn.type = 'button';
   sampleBtn.className = 'demo-src';
   sampleBtn.textContent = 'Use sample video';
-  sampleBtn.disabled = !hasEnabledRule || demoActive;
+  sampleBtn.disabled = demoActive;
   sampleBtn.addEventListener('click', useSampleVideo);
   wrap.appendChild(sampleBtn);
 
@@ -256,18 +256,9 @@ function renderDemoSources() {
   uploadBtn.type = 'button';
   uploadBtn.className = 'demo-src';
   uploadBtn.textContent = 'Upload video';
-  uploadBtn.disabled = !hasEnabledRule || demoActive;
+  uploadBtn.disabled = demoActive;
   uploadBtn.addEventListener('click', () => document.getElementById('demoVideoInput').click());
   wrap.appendChild(uploadBtn);
-
-  if (demoActive) {
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'demo-src active';
-    cancelBtn.textContent = 'Cancel analysis';
-    cancelBtn.addEventListener('click', cancelDemoRun);
-    wrap.appendChild(cancelBtn);
-  }
 
   if (!demoActive && demoRunCompleted) {
     const reportBtn = document.createElement('button');
@@ -282,21 +273,33 @@ function renderDemoSources() {
     });
     wrap.appendChild(reportBtn);
   }
+}
 
-  if (!hasEnabledRule && !demoActive) {
-    setDemoStatus('Add at least one enabled rule before selecting a video.');
-  }
+function onDemoVideoLoaded() {
+  demoVideoLoaded = true;
+  demoRunCompleted = false;
+  renderDemoSources();
+  if (typeof updateStartDisabled === 'function') updateStartDisabled();
+  loadDemoPreviewFrame();
+  setDemoStatus('Video loaded — add zones if needed, then click Start monitoring');
+}
+
+// draws a real frame from the loaded video onto the scene canvas so the
+// visible preview (and anything captured off it, e.g. freezeFeed) shows
+// actual content instead of the placeholder — before any run has started
+function loadDemoPreviewFrame() {
+  const img = new Image();
+  img.onload = () => sceneCtx.drawImage(img, 0, 0, DEMO_W, DEMO_H);
+  img.src = `/demo_run/current_frame?ts=${Date.now()}`;
 }
 
 function useSampleVideo() {
-  if (rules.filter(r => r.enabled).length === 0) return;
   setDemoStatus('Loading sample video…');
   fetch('/demo_run/load_sample', { method: 'POST' })
     .then(r => r.json())
     .then(d => {
       if (!d.ok) { setDemoStatus(d.error || 'Failed to load sample video'); return; }
-      demoVideoLoaded = true;
-      startDemoRun();
+      onDemoVideoLoaded();
     })
     .catch(() => setDemoStatus('Failed to load sample video'));
 }
@@ -313,13 +316,25 @@ document.getElementById('demoVideoInput').addEventListener('change', () => {
     .then(d => {
       input.value = '';
       if (!d.ok) { setDemoStatus(d.error || 'Upload failed'); return; }
-      demoVideoLoaded = true;
-      startDemoRun();
+      onDemoVideoLoaded();
     })
     .catch(() => setDemoStatus('Upload failed'));
 });
 
+// matches Python's datetime.now().isoformat(timespec="seconds") — naive local
+// time, no trailing 'Z'/offset — since incident records are stored the same
+// way and compared as naive datetimes server-side (Date().toISOString() is
+// UTC and timezone-aware, which crashed that comparison).
+function localIsoNow() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// only called from the main Start monitoring button while in demo mode
 function startDemoRun() {
+  if (!demoVideoLoaded || rules.filter(r => r.enabled).length === 0) return;
   fetch('/demo_run/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -330,7 +345,8 @@ function startDemoRun() {
       if (!d.ok) { setDemoStatus(d.error || 'Failed to start analysis'); return; }
       demoActive = true;
       demoRunCompleted = false;
-      demoRunStartedAt = new Date().toISOString();
+      demoRunStartedAt = localIsoNow();
+      setMonitoringUI(true, 'Analysing');
       if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
       renderDemoSources();
       document.getElementById('demoProgress').style.width = '0%';
@@ -357,10 +373,11 @@ function pollDemoRun() {
       demoPollInterval = null;
       demoActive = false;
       demoRunCompleted = true;
+      setMonitoringUI(false);
       renderDemoSources();
       if (typeof loadDigestStats === 'function') loadDigestStats();
       const alertCount = (d.alerts || []).length;
-      const ruleCount = new Set((d.alerts || []).map(a => a.rule)).size;
+      const ruleCount = d.rule_count || 0;
       setDemoStatus(
         `Analysed ${d.total} frame${d.total === 1 ? '' : 's'} — ` +
         `${alertCount} alert${alertCount === 1 ? '' : 's'} triggered across ` +
@@ -375,6 +392,7 @@ function cancelDemoRun() {
   fetch('/demo_run/cancel', { method: 'POST' }).then(() => {
     if (demoPollInterval) { clearInterval(demoPollInterval); demoPollInterval = null; }
     demoActive = false;
+    setMonitoringUI(false);
     renderDemoSources();
     setDemoStatus('Cancelled.');
   });
@@ -969,17 +987,17 @@ function loadZones() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const RULE_LIBRARY_MANUFACTURING = {
-  'People':   ['Person enters the frame', 'Person loiters in view', 'Multiple people gathered', 'Person falls down', 'Person running'],
-  'Objects':  ['Object left behind', 'Object removed from view', 'Unattended bag or package'],
-  'Safety':   ['Person without a helmet', 'Smoke or fire detected', 'Door left open', 'Spill on the floor'],
-  'Vehicles': ['Vehicle enters the driveway', 'Vehicle parked illegally', 'Vehicle reversing'],
+  'People':   ['Person present in the frame', 'Person loitering in view', 'Multiple people gathered', 'Person lying or collapsed on the floor', 'Person running'],
+  'Objects':  ['Object left behind', 'Object missing from view', 'Unattended bag or package'],
+  'Safety':   ['Person without a helmet', 'Smoke or fire visible', 'Door left open', 'Spill on the floor'],
+  'Vehicles': ['Vehicle present in the driveway', 'Vehicle parked illegally', 'Vehicle reversing'],
 };
 
 const RULE_LIBRARY_OTHER = {
   'Retail':      ['Queue too long', 'Shelf empty', 'Unattended counter'],
   'Hospitality': ['Uncleared table', 'Pool unattended'],
-  'Vehicle':     ['Vehicle enters driveway', 'Illegal parking', 'Vehicle reversing'],
-  'Home':        ['Person at front door', 'Package delivered unattended'],
+  'Vehicle':     ['Vehicle present in driveway', 'Illegal parking', 'Vehicle reversing'],
+  'Home':        ['Person at front door', 'Unattended package present at the door'],
 };
 
 function loadRules() {
@@ -1296,13 +1314,31 @@ let pollInterval = null;
 
 function updateStartDisabled() {
   if (monitoringActive) return;
-  document.getElementById('startBtn').disabled = rules.filter(r => r.enabled).length === 0;
+  const startBtn = document.getElementById('startBtn');
+  const hasRule = rules.filter(r => r.enabled).length > 0;
+
+  if (feedMode === 'demo') {
+    const missing = [];
+    if (!demoVideoLoaded) missing.push('a video');
+    if (!hasRule) missing.push('an enabled rule');
+    startBtn.disabled = missing.length > 0;
+    startBtn.dataset.tip = missing.length > 0
+      ? `Add ${missing.join(' and ')} before starting analysis`
+      : '';
+  } else {
+    startBtn.disabled = !hasRule;
+    startBtn.dataset.tip = 'Add at least one enabled rule to start monitoring';
+  }
 }
 
 // the backend's DetectorThread pulls enabled rules (with their own zone scoping)
 // straight from the shared rules_store every cycle — the "rule" field here is
 // just a required non-empty placeholder for the /start endpoint.
 function startMonitoring() {
+  if (feedMode === 'demo') {
+    startDemoRun();
+    return;
+  }
   if (rules.filter(r => r.enabled).length === 0) return;
   fetch('/start', {
     method: 'POST',
@@ -1312,15 +1348,19 @@ function startMonitoring() {
 }
 
 function stopMonitoring() {
+  if (feedMode === 'demo') {
+    cancelDemoRun();
+    return;
+  }
   fetch('/stop', { method: 'POST' }).then(() => setMonitoringUI(false));
 }
 
-function setMonitoringUI(active) {
+function setMonitoringUI(active, label) {
   monitoringActive = active;
   document.getElementById('startBtn').hidden = active;
   document.getElementById('stopBtn').hidden = !active;
   document.getElementById('statusBadge').classList.toggle('active', active);
-  document.getElementById('statusLabel').textContent = active ? 'Monitoring' : 'Idle';
+  document.getElementById('statusLabel').textContent = active ? (label || 'Monitoring') : 'Idle';
   document.querySelector('.rules-card').classList.toggle('locked', active);
   if (!active) updateStartDisabled();
 }
@@ -1333,8 +1373,13 @@ function startPolling() {
 
 function pollAlerts() {
   fetch('/alerts/json').then(r => r.json()).then(data => {
-    // sync UI with backend state — monitoring may have been started/stopped elsewhere
-    setMonitoringUI(!!data.monitoring);
+    // sync UI with backend state — monitoring may have been started/stopped
+    // elsewhere. Skip this while a demo run is active: that has its own
+    // poll loop (pollDemoRun) driving the same Start/Stop button, and this
+    // live-mode poll would otherwise stomp it back to "Start" every 2s.
+    if (!demoActive) {
+      setMonitoringUI(!!data.monitoring);
+    }
     renderAlerts(data.alerts || []);
   }).catch(() => {});
 }

@@ -1,8 +1,16 @@
 [
   {
-    "id": "7883fa29c13e4d40b9fa7d2536ccca9d",
-    "rule_text": "Is a person visible in this area?",
-    "zone_name": "Checkout Counter",
+    "id": "6cfaaeef0292404a871a515837bb2f56",
+    "rule_text": "Is a person present inside this zone?",
+    "zone_name": "Abs",
+    "enabled": true,
+    "zone_name_cleared": false,
+    "rule_type": "standard"
+  },
+  {
+    "id": "33b53a3d92d044949d8bf3d6b124ef7a",
+    "rule_text": "Person present in the frame",
+    "zone_name": "aaa",
     "enabled": true,
     "zone_name_cleared": false,
     "rule_type": "standard"

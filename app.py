@@ -189,7 +189,8 @@ def demo_run_start():
     enabled_rules = rules_store.get_enabled_rules()
     print(f"[demo_run_start] enabled_rules passed to DemoRunThread ({len(enabled_rules)}): {enabled_rules}")
     if not enabled_rules:
-        return jsonify(error="Add at least one rule before selecting a video."), 400
+        print("[demo_run_start] REJECTED — no enabled rules, refusing to start a run against nothing")
+        return jsonify(error="No enabled rules — add a rule before starting analysis"), 400
     video_path = runtime_state.get_video_path()
     print(f"[demo_run_start] video_path={video_path!r}")
     if not video_path or not Path(video_path).exists():
