@@ -12,7 +12,49 @@
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-mark" aria-hidden="true">
+          <svg class="brand-eye" viewBox="0 0 52 32" xmlns="http://www.w3.org/2000/svg">
+            <!-- upper eyelashes -->
+            <path d="M7 13 C5 9, 4 6, 3 3"   stroke="#1C1917" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+            <path d="M12 9 C11 6, 10 3, 9 1"  stroke="#1C1917" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+            <path d="M18 7 C18 4, 18 2, 18 0"  stroke="#1C1917" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+            <path d="M26 6 C27 3, 28 1, 29 0"  stroke="#1C1917" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+            <path d="M33 8 C35 5, 37 3, 39 2"  stroke="#1C1917" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+
+            <!-- outer eye shape (almond) -->
+            <path d="M3 16 C7 8, 16 5, 26 5 C36 5, 45 8, 49 16 C45 24, 36 27, 26 27 C16 27, 7 24, 3 16Z"
+                  fill="#1C1917"/>
+
+            <!-- sclera -->
+            <ellipse cx="26" cy="16" rx="15" ry="9" fill="#FAFAF9"/>
+
+            <!-- iris outer ring (rose) -->
+            <circle cx="26" cy="16" r="7.5" fill="#BE123C"/>
+            <!-- iris mid ring (lighter rose) -->
+            <circle cx="26" cy="16" r="6" fill="#E11D48"/>
+            <!-- iris inner ring (soft rose) -->
+            <circle cx="26" cy="16" r="4.5" fill="#F43F5E"/>
+            <!-- iris radial lines for texture -->
+            <line x1="26" y1="9" x2="26" y2="23" stroke="#BE123C" stroke-width="0.3" opacity="0.5"/>
+            <line x1="19.5" y1="13" x2="32.5" y2="19" stroke="#BE123C" stroke-width="0.3" opacity="0.5"/>
+            <line x1="19.5" y1="19" x2="32.5" y2="13" stroke="#BE123C" stroke-width="0.3" opacity="0.5"/>
+
+            <!-- pupil -->
+            <circle cx="26" cy="16" r="3" fill="#0C0A09"/>
+
+            <!-- main highlight -->
+            <circle cx="23.8" cy="13.5" r="1.8" fill="white" opacity="0.9"/>
+            <!-- secondary highlight -->
+            <circle cx="28.5" cy="18" r="0.8" fill="white" opacity="0.45"/>
+
+            <!-- upper eyelid crease -->
+            <path d="M7 16 C11 9, 19 6.5, 26 6.5 C33 6.5, 41 9, 45 16"
+                  fill="none" stroke="#0C0A09" stroke-width="0.7" opacity="0.25"/>
+            <!-- lower lash line -->
+            <path d="M8 17 C12 23, 20 25.5, 26 25.5 C32 25.5, 40 23, 44 17"
+                  fill="none" stroke="#1C1917" stroke-width="0.5" opacity="0.2"/>
+          </svg>
+        </span>
         <span class="brand-name">OpenEye</span>
       </div>
       <nav class="main-nav" id="mainNav" aria-label="Main">
@@ -152,9 +194,58 @@
           </div>
 
           <div class="rule-composer">
-            <input id="ruleInput" type="text"
-                   placeholder="Describe what to watch for (e.g. “Is a person inside the danger zone?”)"
-                   maxlength="200" autocomplete="off" spellcheck="false" />
+            <select id="ruleTypeSelect" title="Rule type">
+              <option value="standard" selected>Standard</option>
+              <option value="proximity">Proximity</option>
+              <option value="ppe_check">PPE Check</option>
+            </select>
+            <div class="rule-fields" id="ruleFieldsStandard">
+              <input id="ruleInput" type="text"
+                     placeholder="Describe what to watch for (e.g. “Is a person inside the danger zone?”)"
+                     maxlength="200" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="rule-fields" id="ruleFieldsProximity" hidden>
+              <input id="proxSubjectInput" type="text" placeholder="Subject (e.g. person)"
+                     maxlength="60" autocomplete="off" />
+              <input id="proxHazardInput" type="text" placeholder="Hazard (e.g. fire, machinery)"
+                     maxlength="60" autocomplete="off" />
+            </div>
+            <div class="rule-fields ppe-checklist-wrap" id="ruleFieldsPpe" hidden>
+              <div class="ppe-checklist" id="ppeChecklist">
+                <button type="button" class="ppe-chip" data-item="Hard hat">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M4 18v-3a8 8 0 0 1 16 0v3"/><path d="M12 3v4"/></svg>
+                  <span>Hard hat</span>
+                </button>
+                <button type="button" class="ppe-chip" data-item="Safety vest">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l-4 8v12h16V10l-4-8"/><path d="M4 10h16"/><path d="M12 2v8"/></svg>
+                  <span>Safety vest</span>
+                </button>
+                <button type="button" class="ppe-chip" data-item="Safety goggles">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="14" r="4"/><circle cx="16" cy="14" r="4"/><path d="M12 14h0"/><path d="M2 10l2 4"/><path d="M22 10l-2 4"/></svg>
+                  <span>Goggles</span>
+                </button>
+                <button type="button" class="ppe-chip" data-item="Gloves">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20V10l3-7h1l1 5h2l1-5h1l3 7v10z"/></svg>
+                  <span>Gloves</span>
+                </button>
+                <button type="button" class="ppe-chip" data-item="Safety boots">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h16v2H4z"/><path d="M6 18v-6l2-8h4l2 8"/><path d="M14 12h6v6"/></svg>
+                  <span>Safety boots</span>
+                </button>
+                <button type="button" class="ppe-chip" data-item="Face mask">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10c0-4 4-7 8-7s8 3 8 7c0 5-3 10-8 10s-8-5-8-10z"/><path d="M9 12h6"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/></svg>
+                  <span>Face mask</span>
+                </button>
+                <button type="button" class="ppe-chip" data-item="Ear protection">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0v4a6 6 0 0 1-12 0V8z"/><rect x="3" y="9" width="4" height="6" rx="1"/><rect x="17" y="9" width="4" height="6" rx="1"/><path d="M7 9v6"/><path d="M17 9v6"/></svg>
+                  <span>Ear protection</span>
+                </button>
+                <button type="button" class="ppe-chip" data-item="Safety harness">
+                  <svg class="ppe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M8 6h8"/><path d="M6 10l6 4 6-4"/><path d="M8 18h8"/></svg>
+                  <span>Safety harness</span>
+                </button>
+              </div>
+            </div>
             <select id="zoneSelect" title="Restrict rule to a zone">
               <option value="">Whole frame</option>
             </select>

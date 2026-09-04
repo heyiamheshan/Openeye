@@ -46,6 +46,15 @@ const rulesSubEl   = document.getElementById('rulesSub');
 const ruleInputEl  = document.getElementById('ruleInput');
 const zoneSelectEl = document.getElementById('zoneSelect');
 const addRuleBtnEl = document.getElementById('addRuleBtn');
+const ruleTypeSelectEl  = document.getElementById('ruleTypeSelect');
+const proxSubjectInput  = document.getElementById('proxSubjectInput');
+const proxHazardInput   = document.getElementById('proxHazardInput');
+const ppeChecklist      = document.getElementById('ppeChecklist');
+
+// PPE chip toggle
+document.querySelectorAll('.ppe-chip').forEach(chip => {
+  chip.addEventListener('click', () => chip.classList.toggle('active'));
+});
 
 const alertCountEl = document.getElementById('alertCount');
 const alertsListEl = document.getElementById('alertsList');
@@ -1441,6 +1450,7 @@ function loadRules() {
         zone: r.zone_name,
         enabled: r.enabled,
         zoneCleared: r.zone_name_cleared,
+        ruleType: r.rule_type || 'standard',
       }));
       renderRules();
       renderZoneList();
@@ -1449,11 +1459,12 @@ function loadRules() {
     .catch(() => {});
 }
 
-function addRule(text, zone) {
+function addRule(text, zone, extra = {}) {
   text = (text || '').trim();
   if (!text || monitoringActive) return;
   const zoneName = zone && savedZones[zone] ? zone : null;
-  fetchJson('/rules', { method: 'POST', body: { rule_text: text, zone_name: zoneName } })
+  const body = { rule_text: text, zone_name: zoneName, ...extra };
+  fetchJson('/rules', { method: 'POST', body })
     .then(d => {
       if (!d.ok) { toast(d.error || 'Failed to add rule'); return; }
       loadRules();
@@ -1486,6 +1497,12 @@ function renderRules() {
     const text = el('span', 'rule-text', r.text);
     text.title = r.text;
     row.appendChild(text);
+
+    if (r.ruleType && r.ruleType !== 'standard') {
+      const badge = el('span', 'rule-type-badge type-' + (r.ruleType === 'ppe_check' ? 'ppe' : r.ruleType),
+        r.ruleType === 'proximity' ? 'Proximity' : 'PPE');
+      row.appendChild(badge);
+    }
 
     if (r.zone) {
       const zb = el('span', 'rule-zone', r.zone);
@@ -1525,14 +1542,52 @@ function updateRulesSub() {
     : `${enabled} of ${rules.length} enabled`;
 }
 
-// composer — text input + zone select + Add
-addRuleBtnEl.addEventListener('click', () => {
-  const text = ruleInputEl.value;
-  addRule(text, zoneSelectEl.value);
-  ruleInputEl.value = '';
-  ruleInputEl.focus();
+// ── rule type selector — toggle field groups ───────────────────────────────────
+ruleTypeSelectEl.addEventListener('change', () => {
+  const t = ruleTypeSelectEl.value;
+  document.getElementById('ruleFieldsStandard').hidden = t !== 'standard';
+  document.getElementById('ruleFieldsProximity').hidden = t !== 'proximity';
+  document.getElementById('ruleFieldsPpe').hidden = t !== 'ppe_check';
 });
 
+// composer — type-aware Add
+addRuleBtnEl.addEventListener('click', () => {
+  const type = ruleTypeSelectEl.value;
+  const zone = zoneSelectEl.value;
+
+  if (type === 'standard') {
+    const text = ruleInputEl.value.trim();
+    if (!text) { toast('Enter a rule description'); return; }
+    addRule(text, zone);
+    ruleInputEl.value = '';
+    ruleInputEl.focus();
+  } else if (type === 'proximity') {
+    const subject = proxSubjectInput.value.trim();
+    const hazard = proxHazardInput.value.trim();
+    if (!subject || !hazard) { toast('Both subject and hazard are required'); return; }
+    addRule(`Proximity: ${subject} near ${hazard}`, zone, {
+      rule_type: 'proximity', subject, hazard,
+    });
+    proxSubjectInput.value = '';
+    proxHazardInput.value = '';
+    proxSubjectInput.focus();
+  } else if (type === 'ppe_check') {
+    const items = Array.from(document.querySelectorAll('.ppe-chip.active'))
+      .map(c => c.dataset.item);
+    if (items.length === 0) { toast('Select at least one PPE item'); return; }
+    addRule(`PPE check: ${items.join(', ')}`, zone, {
+      rule_type: 'ppe_check', required_ppe: items,
+    });
+    document.querySelectorAll('.ppe-chip.active').forEach(c => c.classList.remove('active'));
+  }
+});
+
+// Enter submits from whichever field is visible
+document.querySelectorAll('.rule-fields input').forEach(inp => {
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addRuleBtnEl.click();
+  });
+});
 ruleInputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addRuleBtnEl.click();
 });

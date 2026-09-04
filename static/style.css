@@ -104,11 +104,29 @@ img { display: block; }
 }
 
 .brand-mark {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-50);
+  width: 40px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.brand-eye {
+  width: 100%;
+  height: 100%;
+  display: block;
+  animation: blink 4.5s ease-in-out infinite;
+  transform-origin: center center;
+}
+
+/* natural double-blink */
+@keyframes blink {
+  0%,  88%, 100% { transform: scaleY(1); }
+  91%            { transform: scaleY(0.05); }
+  93%            { transform: scaleY(1); }
+  95%            { transform: scaleY(0.05); }
+  97%            { transform: scaleY(1); }
 }
 
 .brand-name {
@@ -775,12 +793,103 @@ img { display: block; }
 
 .rule-composer {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+/* type selector: full-width first row */
+#ruleTypeSelect {
+  width: 100%;
+  flex: 0 0 100%;
+  padding: 8px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+#ruleTypeSelect:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.12);
+}
+
+/* fields wrapper: children participate directly in parent flex */
+.rule-fields {
+  display: contents;
+}
+
+.rule-fields input {
+  flex: 1;
+  min-width: 80px;
+  padding: 8px 12px;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.rule-fields input::placeholder { color: var(--text-3); }
+.rule-fields input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.12);
+}
+
+/* ── PPE checklist ─────────────────────────────────────────────── */
+.ppe-checklist-wrap {
+  flex: 0 0 100%;
+}
+.ppe-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ppe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 140ms ease;
+}
+.ppe-chip:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+.ppe-chip.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 1px 4px rgba(225, 29, 72, 0.25);
+}
+.ppe-chip.active:hover {
+  background: #be123c;
+}
+.ppe-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 #ruleInput {
   flex: 1;
-  min-width: 0;
+  min-width: 80px;
   padding: 8px 12px;
   font-family: var(--font);
   font-size: 14px;
@@ -914,6 +1023,25 @@ img { display: block; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.rule-type-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.rule-type-badge.type-proximity {
+  color: #1D4ED8;
+  background: #DBEAFE;
+}
+.rule-type-badge.type-ppe {
+  color: #0E7A2B;
+  background: #D1FAE5;
 }
 
 .rule-row.disabled .rule-text { color: var(--text-3); font-weight: 400; }
@@ -1491,10 +1619,11 @@ button.digest-stat-row:hover .digest-count { color: var(--accent-dark); }
   .mode-toggle { flex: 1; justify-content: center; }
   .mode-btn { flex: 1; text-align: center; }
 
-  .rule-composer { flex-wrap: wrap; }
-  #ruleInput { width: 100%; flex-basis: 100%; }
-  #zoneSelect { flex: 1; width: auto; }
-  .rule-composer .btn { flex: 1; }
+  .rule-composer { flex-direction: column; align-items: stretch; }
+  .rule-fields input,
+  #ruleInput,
+  #zoneSelect,
+  .rule-composer .btn { width: 100%; flex-basis: auto; }
 
   .alert-row { padding: 8px; }
   .alert-thumb { width: 44px; height: 44px; }
