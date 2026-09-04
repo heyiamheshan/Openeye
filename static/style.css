@@ -1775,3 +1775,141 @@ button.digest-stat-row:hover .digest-count { color: var(--accent-dark); }
   margin-top: 8px;
   margin-bottom: 0;
 }
+
+/* ── Telegram status dot (header) ─────────────────────────────── */
+.tg-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+  margin-left: 4px;
+  flex-shrink: 0;
+  transition: background 200ms ease;
+}
+.tg-status-dot.tg-ok     { background: #16a34a; }
+.tg-status-dot.tg-fail   { background: var(--accent); }
+.tg-status-dot.tg-unconf { background: var(--text-3); }
+
+/* ── Contacts card ─────────────────────────────────────────────── */
+.contacts-card { padding: 0; }
+.contacts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+.contacts-head:hover { background: var(--surface-2); }
+.contact-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+  margin-left: 6px;
+}
+.contacts-chevron {
+  color: var(--text-3);
+  transition: transform 200ms ease;
+}
+.contacts-card.expanded .contacts-chevron { transform: rotate(180deg); }
+.contacts-body { padding: 0 16px 16px; }
+.contacts-intro {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
+.contacts-list { margin-bottom: 12px; }
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.contact-row:last-child { border-bottom: none; }
+.contact-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.contact-chat {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: monospace;
+}
+.contact-zone-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.contact-del {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.contact-del:hover { color: var(--accent); background: rgba(225,29,72,0.08); }
+
+.contact-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.contact-form-label {
+  width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.contact-form input,
+.contact-form select {
+  flex: 1;
+  min-width: 80px;
+  padding: 6px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.contact-form input:focus,
+.contact-form select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(225,29,72,0.12);
+}
+
+/* ── Alert delivery status ─────────────────────────────────────── */
+.alert-delivery {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.alert-delivery-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.alert-delivery-dot.d-fail { background: var(--accent); }

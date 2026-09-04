@@ -21,3 +21,8 @@ MAX_PARALLEL_RULES = int(os.environ.get("MAX_PARALLEL_RULES", "4"))
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").strip().lower() == "true"
 DEMO_VIDEO_PATH = os.environ.get("DEMO_VIDEO_PATH", "")
 UPLOADS_DIR = os.environ.get("UPLOADS_DIR", "uploads")
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+ESCALATION_ENABLED = os.environ.get("ESCALATION_ENABLED", "true").strip().lower() == "true"
+ESCALATION_COOLDOWN_SECONDS = int(os.environ.get("ESCALATION_COOLDOWN_SECONDS", "60"))

@@ -1,55 +1,8 @@
 [
   {
-    "id": "d12808cf68b14bde84c6c3ab850e9e76",
-    "rule_text": "Is any worker in the Central Packing Station without an orange safety vest?",
-    "zone_name": null,
-    "enabled": true,
-    "zone_name_cleared": true,
-    "rule_type": "ppe_check",
-    "required_ppe": [
-      "orange safety vest"
-    ]
-  },
-  {
-    "id": "b4efe241d68a464d89b166577b6ef720",
-    "rule_text": "Is a person standing within 1 meter of the yellow pallet jack without actively operating it?",
-    "zone_name": null,
-    "enabled": true,
-    "zone_name_cleared": true,
-    "rule_type": "proximity",
-    "subject": "person",
-    "hazard": "unsecured mobile equipment"
-  },
-  {
-    "id": "67acc26904f2454b80cb53382d78f134",
-    "rule_text": "Are any boxes stacked higher than 1.5 meters in the Right-Side Pallet Storage zone without visible bracing or strapping?",
-    "zone_name": null,
-    "enabled": true,
-    "zone_name_cleared": true,
-    "rule_type": "standard"
-  },
-  {
-    "id": "a17b7617f5274dab854e51a484f00555",
-    "rule_text": "Is any worker at the Central Packing Station handling small components without wearing gloves?",
-    "zone_name": null,
-    "enabled": true,
-    "zone_name_cleared": true,
-    "rule_type": "standard"
-  },
-  {
-    "id": "9ec280322a884a35b0ee9e2966f14601",
-    "rule_text": "Is anyone working under or immediately adjacent to a stack of boxes taller than 2 meters?",
-    "zone_name": null,
-    "enabled": true,
-    "zone_name_cleared": true,
-    "rule_type": "proximity",
-    "subject": "person",
-    "hazard": "falling boxes"
-  },
-  {
-    "id": "58d21db83b9e47939e6e55fecc6fd459",
-    "rule_text": "Is the plastic sheeting enclosure around the work area fully secured and not obstructing emergency exits or walkways?",
-    "zone_name": null,
+    "id": "c9c734c91d664e98a62c0a4238e0e2d0",
+    "rule_text": "in human hand visible in there",
+    "zone_name": "ABC",
     "enabled": true,
     "zone_name_cleared": false,
     "rule_type": "standard"

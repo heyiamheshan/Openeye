@@ -9,6 +9,8 @@ from flask import Flask, Response, jsonify, render_template, request, send_from_
 from werkzeug.utils import secure_filename
 
 import config
+import contacts_store
+import escalation
 import incident_log
 import rules_store
 import runtime_state
@@ -509,6 +511,42 @@ def scene_apply():
         zones_created=zones_created,
         rules_created=rules_created,
     )
+
+
+# ── Telegram Contacts ──────────────────────────────────────────────────────────
+
+
+@app.route("/contacts")
+def get_contacts():
+    return jsonify(contacts=contacts_store.get_contacts())
+
+
+@app.route("/contacts", methods=["POST"])
+def create_contact():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    chat_id = (data.get("telegram_chat_id") or "").strip()
+    if not name or not chat_id:
+        return jsonify(error="name and telegram_chat_id are required"), 400
+    zone_name = (data.get("zone_name") or "").strip() or None
+    contact = contacts_store.add_contact(name, chat_id, zone_name)
+    return jsonify(ok=True, contact=contact)
+
+
+@app.route("/contacts/<contact_id>", methods=["DELETE"])
+def remove_contact(contact_id):
+    deleted = contacts_store.delete_contact(contact_id)
+    if not deleted:
+        return jsonify(error="Contact not found"), 404
+    return jsonify(ok=True)
+
+
+@app.route("/telegram/status")
+def telegram_status():
+    """Returns the last Telegram delivery status for the header indicator."""
+    status = escalation.get_last_delivery()
+    configured = bool(config.TELEGRAM_BOT_TOKEN and config.ESCALATION_ENABLED)
+    return jsonify(configured=configured, **status)
 
 
 if __name__ == "__main__":

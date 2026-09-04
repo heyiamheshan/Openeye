@@ -69,6 +69,18 @@ document.querySelectorAll('.ppe-chip').forEach(chip => {
 const alertCountEl = document.getElementById('alertCount');
 const alertsListEl = document.getElementById('alertsList');
 
+// Telegram & Contacts
+const tgStatusDot      = document.getElementById('tgStatusDot');
+const contactsCard      = document.getElementById('contactsCard');
+const contactsHead      = document.getElementById('contactsHead');
+const contactsBody      = document.getElementById('contactsBody');
+const contactsList      = document.getElementById('contactsList');
+const contactCount      = document.getElementById('contactCount');
+const contactNameInput  = document.getElementById('contactNameInput');
+const contactChatInput  = document.getElementById('contactChatInput');
+const contactZoneSelect = document.getElementById('contactZoneSelect');
+const addContactBtn     = document.getElementById('addContactBtn');
+
 const digestHeaderBtnEl = document.getElementById('digestHeaderBtn');
 const digestBodyEl      = document.getElementById('digestBody');
 const digestChevronEl   = document.getElementById('digestChevron');
@@ -1756,6 +1768,27 @@ function buildAlertRow(alert) {
   ].filter(Boolean);
   body.appendChild(el('p', 'alert-meta', metaParts.join(' · ')));
 
+  // Delivery status line
+  const delivery = alert.delivery;
+  if (delivery) {
+    let label = '', dotClass = '';
+    if (delivery.suppressed) {
+      label = 'Duplicate — not resent';
+    } else if (delivery.success) {
+      label = 'Telegram sent';
+    } else if (delivery.detail === 'dashboard only') {
+      label = 'Dashboard only';
+    } else {
+      label = 'Telegram failed';
+      dotClass = 'd-fail';
+    }
+    const dRow = el('div', 'alert-delivery');
+    const dot = el('span', 'alert-delivery-dot' + (dotClass ? ' ' + dotClass : ''));
+    dRow.appendChild(dot);
+    dRow.appendChild(document.createTextNode(label));
+    body.appendChild(dRow);
+  }
+
   row.appendChild(body);
   return row;
 }
@@ -2260,3 +2293,109 @@ function _esc(s) {
   d.textContent = s;
   return d.innerHTML;
 }
+
+// ── Telegram status indicator ──────────────────────────────────────────────
+
+function pollTelegramStatus() {
+  fetchJson('/telegram/status')
+    .then(d => {
+      tgStatusDot.classList.remove('tg-ok', 'tg-fail', 'tg-unconf');
+      if (!d.configured) {
+        tgStatusDot.classList.add('tg-unconf');
+        tgStatusDot.title = 'Telegram: not configured';
+      } else if (d.success === true) {
+        tgStatusDot.classList.add('tg-ok');
+        tgStatusDot.title = 'Telegram: last send OK';
+      } else if (d.success === false) {
+        tgStatusDot.classList.add('tg-fail');
+        tgStatusDot.title = 'Telegram: ' + (d.detail || 'failed');
+      } else {
+        tgStatusDot.classList.add('tg-unconf');
+        tgStatusDot.title = 'Telegram: awaiting first alert';
+      }
+    })
+    .catch(() => {});
+}
+pollTelegramStatus();
+setInterval(pollTelegramStatus, 10000);
+
+// ── Contacts card ────────────────────────────────────────────────────────────
+
+let _contactsExpanded = false;
+
+contactsHead.addEventListener('click', () => {
+  _contactsExpanded = !_contactsExpanded;
+  contactsBody.hidden = !_contactsExpanded;
+  contactsCard.classList.toggle('expanded', _contactsExpanded);
+});
+
+function loadContacts() {
+  return fetchJson('/contacts')
+    .then(d => {
+      const contacts = d.contacts || [];
+      contactCount.textContent = contacts.length;
+      contactsList.innerHTML = '';
+      if (!contacts.length) {
+        contactsList.appendChild(el('p', 'empty-state', 'No contacts — alerts use the default chat ID'));
+        return;
+      }
+      contacts.forEach(c => {
+        const row = el('div', 'contact-row');
+        const info = el('div', '');
+        info.appendChild(el('div', 'contact-name', c.name));
+        info.appendChild(el('div', 'contact-chat', c.telegram_chat_id));
+        row.appendChild(info);
+        if (c.zone_name) {
+          row.appendChild(el('span', 'contact-zone-badge', c.zone_name));
+        }
+        const del = el('button', 'contact-del', '\u00d7');
+        del.title = 'Delete contact';
+        del.addEventListener('click', () => {
+          fetchJson('/contacts/' + c.id, { method: 'DELETE' })
+            .then(() => loadContacts())
+            .catch(() => toast('Failed to delete contact'));
+        });
+        row.appendChild(del);
+        contactsList.appendChild(row);
+      });
+    })
+    .catch(() => {});
+}
+
+function refreshContactZoneDropdown() {
+  // Keep the default option, add zones
+  contactZoneSelect.innerHTML = '<option value="">Default \u2014 all unzoned alerts</option>';
+  const zones = savedZones || {};
+  Object.keys(zones).sort().forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    contactZoneSelect.appendChild(opt);
+  });
+}
+
+addContactBtn.addEventListener('click', () => {
+  const name = contactNameInput.value.trim();
+  const chatId = contactChatInput.value.trim();
+  if (!name || !chatId) { toast('Name and chat ID are required'); return; }
+  const zoneName = contactZoneSelect.value || null;
+  fetchJson('/contacts', {
+    method: 'POST',
+    body: { name, telegram_chat_id: chatId, zone_name: zoneName },
+  })
+    .then(() => {
+      contactNameInput.value = '';
+      contactChatInput.value = '';
+      contactZoneSelect.value = '';
+      loadContacts();
+    })
+    .catch(() => toast('Failed to add contact'));
+});
+
+// Load contacts + populate zone dropdown on startup
+loadContacts();
+// Refresh the zone dropdown whenever zones change
+const _origLoadZones = loadZones;
+loadZones = function() {
+  return _origLoadZones().then(() => refreshContactZoneDropdown());
+};

@@ -56,6 +56,7 @@
           </svg>
         </span>
         <span class="brand-name">OpenEye</span>
+        <span class="tg-status-dot" id="tgStatusDot" title="Telegram: not configured"></span>
       </div>
       <nav class="main-nav" id="mainNav" aria-label="Main">
         <a href="#" class="nav-link active" data-view="dashboard">Dashboard</a>
@@ -279,6 +280,28 @@
           </div>
 
           <div class="rules-list" id="rulesList"></div>
+        </div>
+
+        <!-- contacts (collapsible) -->
+        <div class="card contacts-card" id="contactsCard">
+          <div class="card-head contacts-head" id="contactsHead">
+            <h2 class="card-title">Telegram Alerts <span class="contact-count" id="contactCount">0</span></h2>
+            <svg class="contacts-chevron" id="contactsChevron" viewBox="0 0 16 16" width="14" height="14"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6l4 4 4-4"/></svg>
+          </div>
+          <div class="contacts-body" id="contactsBody" hidden>
+            <p class="contacts-intro">Alerts are sent to your Telegram when a rule triggers. Add your Telegram chat ID to receive notifications with the evidence frame attached.</p>
+            <div class="contacts-list" id="contactsList"></div>
+            <div class="contact-form">
+              <label class="contact-form-label">Add a recipient</label>
+              <input id="contactNameInput" type="text" placeholder="Name (e.g. Site Manager)" maxlength="40" autocomplete="off" />
+              <input id="contactChatInput" type="text" placeholder="Telegram chat ID (e.g. 6591305086)" maxlength="30" autocomplete="off" />
+              <select id="contactZoneSelect" title="Assign to zone">
+                <option value="">Default — all unzoned alerts</option>
+              </select>
+              <button type="button" class="btn btn-primary btn-sm" id="addContactBtn">Add</button>
+            </div>
+          </div>
         </div>
 
         <!-- alerts -->
