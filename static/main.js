@@ -37,6 +37,16 @@ const videoFileInput = document.getElementById('videoFileInput');
 const statusBadgeEl = document.getElementById('statusBadge');
 const statusLabelEl = document.getElementById('statusLabel');
 
+// Scene Intelligence
+const analyseSceneBtn = document.getElementById('analyseSceneBtn');
+const scenePanel      = document.getElementById('scenePanel');
+const sceneTitle      = document.getElementById('sceneTitle');
+const sceneBody       = document.getElementById('sceneBody');
+const sceneActions    = document.getElementById('sceneActions');
+const sceneApplyBtn   = document.getElementById('sceneApplyBtn');
+const sceneDismissBtn = document.getElementById('sceneDismissBtn');
+const sceneConfirm    = document.getElementById('sceneConfirm');
+
 const zonesListEl = document.getElementById('zonesList');
 const zonesSubEl  = document.getElementById('zonesSub');
 
@@ -2104,3 +2114,149 @@ fetchJson('/demo_mode')
     }
   })
   .catch(() => {});
+
+// ── Scene Intelligence ─────────────────────────────────────────────────────────
+
+let _sceneAnalysis = null;   // last analysis result
+let _sceneLoading  = false;
+
+function _setSceneBtnLoading(loading) {
+  _sceneLoading = loading;
+  analyseSceneBtn.disabled = loading;
+  analyseSceneBtn.classList.toggle('is-loading', loading);
+}
+
+function _dismissScene() {
+  scenePanel.hidden = true;
+  sceneBody.innerHTML = '';
+  sceneActions.hidden = true;
+  sceneConfirm.hidden = true;
+  _sceneAnalysis = null;
+}
+
+function _renderScene(data) {
+  _sceneAnalysis = data;
+  scenePanel.hidden = false;
+  sceneConfirm.hidden = true;
+
+  // Title
+  sceneTitle.textContent = data.scene_type
+    ? 'Scene: ' + data.scene_type
+    : 'Scene Intelligence';
+
+  let html = '';
+
+  // Observed chips
+  if (data.observed && data.observed.length) {
+    html += '<div class="scene-observed">';
+    data.observed.forEach(item => {
+      html += '<span class="scene-obs-chip">' + _esc(item) + '</span>';
+    });
+    html += '</div>';
+  }
+
+  // Suggested rules checklist
+  const rules = data.suggested_rules || [];
+  if (rules.length) {
+    html += '<div class="scene-rule-list">';
+    rules.forEach((r, i) => {
+      const typeClass = r.rule_type === 'proximity' ? 'type-proximity'
+                      : r.rule_type === 'ppe_check' ? 'type-ppe'
+                      : 'type-standard';
+      const typeLabel = r.rule_type === 'proximity' ? 'Proximity'
+                      : r.rule_type === 'ppe_check' ? 'PPE'
+                      : 'Standard';
+      const prioClass = 'p-' + (r.priority || 'medium');
+      html += '<label class="scene-rule-row">' +
+        '<input type="checkbox" checked data-idx="' + i + '" />' +
+        '<div class="scene-rule-info">' +
+          '<div class="scene-rule-text">' + _esc(r.rule_text) + '</div>' +
+          '<div class="scene-rule-meta">' +
+            '<span class="scene-priority ' + prioClass + '" title="' + _esc(r.priority || 'medium') + '"></span>' +
+            '<span class="scene-type-badge ' + typeClass + '">' + typeLabel + '</span>' +
+            (r.zone_name
+              ? '<span class="scene-zone-badge">' + _esc(r.zone_name) + '</span>'
+              : '') +
+          '</div>' +
+          (r.reason
+            ? '<div class="scene-rule-reason">' + _esc(r.reason) + '</div>'
+            : '') +
+        '</div>' +
+      '</label>';
+    });
+    html += '</div>';
+  }
+
+  sceneBody.innerHTML = html;
+  sceneActions.hidden = !rules.length;
+}
+
+analyseSceneBtn.addEventListener('click', () => {
+  if (_sceneLoading) return;
+  _setSceneBtnLoading(true);
+
+  // Show panel with loading state
+  scenePanel.hidden = false;
+  sceneBody.innerHTML =
+    '<div class="scene-loading">' +
+      '<div class="spinner"></div>' +
+      '<div>Analysing current frame with AI\u2026</div>' +
+    '</div>';
+  sceneActions.hidden = true;
+  sceneConfirm.hidden = true;
+
+  fetchJson('/scene/analyse', { method: 'POST' })
+    .then(data => {
+      _renderScene(data);
+      _setSceneBtnLoading(false);
+    })
+    .catch(err => {
+      sceneBody.innerHTML =
+        '<div class="scene-loading">Analysis failed: ' + _esc(err.message || String(err)) + '</div>';
+      _setSceneBtnLoading(false);
+    });
+});
+
+sceneDismissBtn.addEventListener('click', _dismissScene);
+
+sceneApplyBtn.addEventListener('click', () => {
+  if (!_sceneAnalysis) return;
+
+  // Collect checked indices
+  const checks = sceneBody.querySelectorAll('input[type="checkbox"]:checked');
+  const indices = Array.from(checks).map(cb => parseInt(cb.dataset.idx, 10));
+  if (!indices.length) { toast('Select at least one rule'); return; }
+
+  sceneApplyBtn.disabled = true;
+  sceneApplyBtn.textContent = 'Adding\u2026';
+
+  fetchJson('/scene/apply', {
+    method: 'POST',
+    body: { indices, analysis: _sceneAnalysis },
+  })
+    .then(data => {
+      const msg = 'Added ' + data.rules_created + ' rule' + (data.rules_created !== 1 ? 's' : '') +
+                  ' and ' + data.zones_created + ' zone' + (data.zones_created !== 1 ? 's' : '') +
+                  ' from scene analysis.';
+      sceneConfirm.textContent = msg;
+      sceneConfirm.hidden = false;
+      sceneActions.hidden = true;
+
+      // Refresh zones and rules in the UI
+      loadZones().then(() => loadRules()).catch(() => {});
+    })
+    .catch(err => {
+      toast('Failed to apply: ' + (err.message || String(err)));
+    })
+    .finally(() => {
+      sceneApplyBtn.disabled = false;
+      sceneApplyBtn.textContent = 'Add selected rules';
+    });
+});
+
+// Helper: escape HTML
+function _esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}

@@ -123,6 +123,14 @@
           </div>
           <div class="control-actions">
             <button type="button" class="btn btn-ghost" id="drawZoneBtn">Draw zone</button>
+            <button type="button" class="btn btn-ghost" id="analyseSceneBtn">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>
+              </svg>
+              Analyse scene
+            </button>
             <button type="button" class="btn btn-ghost" id="uploadVideoBtn" hidden
                     title="Use your own video clip as the demo feed">
               <span class="btn-spinner" aria-hidden="true"></span>
@@ -162,6 +170,19 @@
         <!-- hidden input backing the demo Upload video button -->
         <input type="file" id="videoFileInput"
                accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo" hidden />
+
+        <!-- Scene Intelligence panel -->
+        <div class="card scene-panel" id="scenePanel" hidden>
+          <div class="scene-panel-head">
+            <h2 class="card-title" id="sceneTitle">Scene Intelligence</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="sceneDismissBtn">Dismiss</button>
+          </div>
+          <div class="scene-body" id="sceneBody"></div>
+          <div class="scene-actions" id="sceneActions" hidden>
+            <button type="button" class="btn btn-primary btn-sm" id="sceneApplyBtn">Add selected rules</button>
+          </div>
+          <p class="scene-confirm" id="sceneConfirm" hidden></p>
+        </div>
 
         <!-- zones: chips with rule-count badges + inline naming prompt -->
         <div class="card zones-card">

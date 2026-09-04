@@ -12,6 +12,7 @@ import config
 import incident_log
 import rules_store
 import runtime_state
+import scene_analyst
 import zones_store
 from detector import DetectorThread
 
@@ -422,6 +423,91 @@ def digest_ai():
         summary=_digest_summary(stats, hours),
         digest=digest_text,
         stats=stats,
+    )
+
+
+# ── Scene Intelligence ─────────────────────────────────────────────────────────
+
+
+@app.route("/scene/analyse", methods=["POST"])
+def scene_analyse():
+    """Capture the current frame and send it to the VLM for scene analysis."""
+    ok, frame = _read_frame()
+    if not ok or frame is None:
+        return jsonify(error="Failed to capture frame — check camera or load a demo video"), 503
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+        return jsonify(error="Failed to encode frame"), 503
+    try:
+        result = scene_analyst.analyse_scene(buf.tobytes())
+    except RuntimeError as exc:
+        return jsonify(error=str(exc)), 502
+    return jsonify(ok=True, **result)
+
+
+@app.route("/scene/apply", methods=["POST"])
+def scene_apply():
+    """Accept selected suggestion indices, create zones and rules."""
+    data = request.get_json(silent=True) or {}
+    indices = data.get("indices", [])
+    analysis = data.get("analysis", {})
+    if not indices or not analysis:
+        return jsonify(error="indices and analysis are required"), 400
+
+    suggested_zones = analysis.get("suggested_zones", [])
+    suggested_rules = analysis.get("suggested_rules", [])
+
+    # Build a map of zone_name → zone from the suggestions
+    zone_map = {}
+    for z in suggested_zones:
+        name = z.get("name", "").strip()
+        if not name:
+            continue
+        bounds = z.get("approx_bounds")
+        if bounds and len(bounds) == 4:
+            zone_map[name] = z
+
+    # Create zones as rectangle polygons (4 corners in normalised space)
+    zones_created = 0
+    for zname, zdata in zone_map.items():
+        x1, y1, x2, y2 = zdata["approx_bounds"]
+        # Ensure x1 < x2 and y1 < y2
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
+        points = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+        zones_store.set_zone(zname, points)
+        zones_created += 1
+
+    # Create rules for selected indices
+    rules_created = 0
+    for idx in indices:
+        if not isinstance(idx, int) or idx < 0 or idx >= len(suggested_rules):
+            continue
+        r = suggested_rules[idx]
+        rule_text = (r.get("rule_text") or "").strip()
+        if not rule_text:
+            continue
+        rule_type = r.get("rule_type", "standard")
+        zone_name = (r.get("zone_name") or "").strip() or None
+        subject = (r.get("subject") or "").strip() or None
+        hazard = (r.get("hazard") or "").strip() or None
+        required_ppe = r.get("required_ppe") or []
+
+        # Skip zone validation — zone was just created above
+        rules_store.add_rule(
+            rule_text,
+            zone_name=zone_name,
+            rule_type=rule_type,
+            required_ppe=required_ppe,
+            subject=subject,
+            hazard=hazard,
+        )
+        rules_created += 1
+
+    return jsonify(
+        ok=True,
+        zones_created=zones_created,
+        rules_created=rules_created,
     )
 
 
