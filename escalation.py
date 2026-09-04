@@ -67,7 +67,7 @@ def format_caption(alert: dict) -> str:
     explanation = alert.get("explanation", "")
 
     lines = [
-        f"{prefix}OpenEye Alert — {sev}",
+        f"{prefix}Openeye Alert — {sev}",
         "",
         f"Rule: {rule_text}",
         f"Zone: {zone}",

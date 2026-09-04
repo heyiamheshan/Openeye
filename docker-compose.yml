@@ -1,0 +1,22 @@
+services:
+  openeye:
+    build: .
+    ports:
+      - "5001:5001"
+    volumes:
+      - alert-data:/app/alerts
+      - log-data:/app/logs
+      - upload-data:/app/uploads
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    # Uncomment below to pass through a USB webcam for live camera mode:
+    # devices:
+    #   - "/dev/video0:/dev/video0"
+
+volumes:
+  alert-data:
+  log-data:
+  upload-data:

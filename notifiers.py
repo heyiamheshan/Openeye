@@ -1,4 +1,4 @@
-"""Telegram notification sender for OpenEye alerts."""
+"""Telegram notification sender for Openeye alerts."""
 
 import logging
 from pathlib import Path

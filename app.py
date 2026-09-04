@@ -37,6 +37,7 @@ _detector_lock = threading.Lock()
 
 _camera_lock = threading.Lock()
 _camera: cv2.VideoCapture | None = None
+_no_camera_placeholder = None  # cached "no camera" JPEG frame
 
 _demo_lock = threading.Lock()
 _demo_cap: cv2.VideoCapture | None = None
@@ -83,6 +84,26 @@ def _read_frame():
         return cam.read()
 
 
+def _get_placeholder_frame():
+    """Generate (once, then cache) a placeholder frame shown when no camera is
+    connected.  Keeps the MJPEG stream alive so the browser connection stays
+    open and the feed area is never blank."""
+    global _no_camera_placeholder
+    if _no_camera_placeholder is not None:
+        return _no_camera_placeholder
+    import numpy as np
+    h, w = 480, 854
+    frame = np.full((h, w, 3), (0x1B, 0x1D, 0x20), dtype=np.uint8)  # BGR dark
+    cv2.putText(frame, "Camera Not Connected", (w // 2 - 210, h // 2 - 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 80, 80), 2, cv2.LINE_AA)
+    cv2.putText(frame, "Connect a camera or switch to Demo mode", (w // 2 - 240, h // 2 + 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 60, 60), 1, cv2.LINE_AA)
+    ok, buf = cv2.imencode(".jpg", frame)
+    if ok:
+        _no_camera_placeholder = buf.tobytes()
+    return _no_camera_placeholder
+
+
 def _gen_frames():
     while True:
         ok, frame = _read_frame()
@@ -94,11 +115,26 @@ def _gen_frames():
                     + buf.tobytes()
                     + b"\r\n"
                 )
+        else:
+            # No frame available (camera disconnected / not present).
+            # Send a placeholder so the MJPEG stream stays alive.
+            placeholder = _get_placeholder_frame()
+            if placeholder:
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                    + placeholder
+                    + b"\r\n"
+                )
         time.sleep(0.04)  # ~25 fps
 
 
 @app.route("/")
-def index():
+def landing():
+    return render_template("landing.html")
+
+
+@app.route("/dashboard")
+def dashboard():
     return render_template("index.html")
 
 

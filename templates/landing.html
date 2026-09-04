@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Openeye | Camera Monitoring</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/landing.css?v=4" />
+</head>
+<body>
+  <header class="site-header" id="header">
+    <div class="header-inner">
+      <a href="/" class="logo">
+        <svg class="brand-eye" viewBox="0 0 52 32" xmlns="http://www.w3.org/2000/svg">
+          <path d="M7 13 C5 9, 4 6, 3 3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+          <path d="M12 9 C11 6, 10 3, 9 1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+          <path d="M18 7 C18 4, 18 2, 18 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+          <path d="M26 6 C27 3, 28 1, 29 0" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+          <path d="M33 8 C35 5, 37 3, 39 2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" fill="none"/>
+          <path d="M3 16 C7 8, 16 5, 26 5 C36 5, 45 8, 49 16 C45 24, 36 27, 26 27 C16 27, 7 24, 3 16Z" fill="currentColor"/>
+          <ellipse cx="26" cy="16" rx="15" ry="9" fill="#FAFAF9"/>
+          <circle cx="26" cy="16" r="7.5" fill="#BE123C"/>
+          <circle cx="26" cy="16" r="6" fill="#E11D48"/>
+          <circle cx="26" cy="16" r="4.5" fill="#F43F5E"/>
+          <circle cx="26" cy="16" r="3" fill="#0C0A09"/>
+          <circle cx="23.8" cy="13.5" r="1.8" fill="white" opacity="0.9"/>
+        </svg>
+        <span>Openeye</span>
+      </a>
+      <nav class="main-nav">
+        <a href="#why">Why Openeye</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#features">Features</a>
+        <a href="#docs">How to start</a>
+      </nav>
+      <div class="header-actions">
+        <a href="/dashboard" class="btn btn-small btn-primary">Open Dashboard</a>
+      </div>
+      <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero" id="hero">
+      <canvas id="heroCanvas" class="hero-canvas"></canvas>
+      <div class="hero-content">
+        <h1 class="hero-title">
+          Any camera.<br>
+          Any rule.<br>
+          <span class="text-rose">No training required.</span>
+        </h1>
+        <p class="hero-subtitle">
+          Turn any CCTV feed into an intelligent safety system. Describe what you want to watch in plain English, draw zones on the feed, and let Openeye alert you the moment it matters.
+        </p>
+        <div class="hero-actions">
+          <a href="/dashboard" class="btn btn-primary">Open Dashboard &rarr;</a>
+          <a href="#how-it-works" class="btn btn-secondary">See how it works</a>
+        </div>
+        <div class="hero-pills">
+          <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>Computer Vision</span>
+          <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2-1 4-2 5l-5 8-5-8c-1-1-2-3-2-5a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2"/></svg>Zone Intelligence</span>
+          <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Zero-Shot Detection</span>
+        </div>
+      </div>
+      <div class="scroll-hint">
+        <span></span>
+      </div>
+    </section>
+
+    <!-- Stats bar -->
+    <section class="stats-bar">
+      <div class="stats-bar-inner">
+        <div class="stat-item">
+          <strong>0</strong>
+          <span>datasets required</span>
+        </div>
+        <div class="stat-item">
+          <strong>&lt;3s</strong>
+          <span>from rule to alert</span>
+        </div>
+        <div class="stat-item">
+          <strong>Any</strong>
+          <span>RTSP / USB camera</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Why Openeye -->
+    <section class="why-section" id="why">
+      <div class="why-inner">
+        <div class="why-lead">
+          <span class="section-label">Why Openeye</span>
+          <h2 class="section-title">Cameras are everywhere. Intelligence isn't.</h2>
+        </div>
+        <div class="why-body">
+          <p>There are over 1 billion surveillance cameras installed worldwide. That is roughly one camera for every eight people on earth. Yet most of them do nothing but record. The footage only gets reviewed after something has already gone wrong.</p>
+          <p>The cost of that gap is measured in lives. The International Labour Organization estimates nearly 3 million workers die every year from work-related accidents and diseases, with over 395 million non-fatal workplace injuries annually. Behind almost every incident is a warning that a camera saw, but no one was watching.</p>
+          <p>Traditional camera AI can only detect what it was expensively trained to detect: a helmet, a person, a vehicle. Teaching it one new thing means collecting a dataset, retraining a model, and hiring an engineer. For most workplaces, that is simply out of reach.</p>
+          <div class="why-highlight">
+            <strong>Closer to home</strong>
+            <p>Sri Lanka reports around 4,000 workplace accidents every year, costing an estimated 600,000 lost working days. In November 2025, a tea-factory worker was dragged into a rolling machine that was missing its mandatory safety guard. In the same week, another worker died when a decades-old machine exploded at a rubber plant. Nobody was watching those machines at the moment it mattered.</p>
+          </div>
+          <p>Openeye turns cameras a business already owns into intelligent safety monitors. No dataset. No training. No engineer. A supervisor types what matters in plain language, and Openeye watches for exactly that, every second of every shift, escalating the moment it sees a violation with the evidence frame attached.</p>
+          <p class="why-close">There are a billion cameras watching the world. Almost none of them understand what they see. Openeye changes that, one sentence at a time.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="how-it-works" id="how-it-works">
+      <div class="section-header">
+        <span class="section-label">How it works</span>
+        <h2 class="section-title">From camera to alert in four steps</h2>
+        <p class="section-subtitle">No training pipelines. No labelers. Just connect a camera, draw a zone, and describe what should trigger an alert.</p>
+      </div>
+
+      <div class="how-tabs">
+        <button class="how-tab active" data-step="0">
+          <span class="tab-num">01</span>
+          <span class="tab-title">Connect camera</span>
+        </button>
+        <button class="how-tab" data-step="1">
+          <span class="tab-num">02</span>
+          <span class="tab-title">Draw zones</span>
+        </button>
+        <button class="how-tab" data-step="2">
+          <span class="tab-num">03</span>
+          <span class="tab-title">Write a rule</span>
+        </button>
+        <button class="how-tab" data-step="3">
+          <span class="tab-num">04</span>
+          <span class="tab-title">Get alerted</span>
+        </button>
+      </div>
+
+      <div class="how-stage">
+        <div class="how-visual">
+          <canvas id="howCanvas" width="720" height="420"></canvas>
+        </div>
+        <div class="how-text">
+          <div class="how-step active" data-step="0">
+            <h3>Plug in any camera or video file</h3>
+            <p>Openeye reads from USB webcams, RTSP streams, or uploaded MP4 files. The built-in demo mode lets you try it instantly without any hardware.</p>
+            <ul>
+              <li>USB webcams and IP cameras</li>
+              <li>Pre-recorded video clips</li>
+              <li>Built-in animated demo scene</li>
+            </ul>
+          </div>
+          <div class="how-step" data-step="1">
+            <h3>Draw zones directly on the feed</h3>
+            <p>Mark the areas that matter. A machine perimeter, a restricted hallway, or a PPE checkpoint. Rules only evaluate inside the zones you define.</p>
+            <ul>
+              <li>Rectangles, polygons, and circles</li>
+              <li>Resize and move zones anytime</li>
+              <li>One zone, many rules</li>
+            </ul>
+          </div>
+          <div class="how-step" data-step="2">
+            <h3>Describe the rule in plain English</h3>
+            <p>No code, no YAML, no model training. Type exactly what you want to detect and Qwen3-VL understands the scene for you.</p>
+            <ul>
+              <li>"Alert if a person enters the danger zone"</li>
+              <li>"Call supervisor when a forklift crosses the yellow line"</li>
+              <li>"Flag anyone near the machine without a hard hat"</li>
+            </ul>
+          </div>
+          <div class="how-step" data-step="3">
+            <h3>Receive instant, contextual alerts</h3>
+            <p>When a rule matches, Openeye saves the frame, scores the detection, and sends a Telegram notification to the right contact. No spam.</p>
+            <ul>
+              <li>Evidence frame attached</li>
+              <li>Per-zone contact routing</li>
+              <li>Smart deduplication</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features" id="features">
+      <div class="section-header">
+        <span class="section-label">Features</span>
+        <h2 class="section-title">Everything you need to monitor smarter</h2>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon rose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <h3>Natural Language Rules</h3>
+          <p>Type what you want watched. No datasets, no model training, no engineers.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon rose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
+          </div>
+          <h3>Zone Intelligence</h3>
+          <p>Draw zones on any camera. Rules apply only inside the zones you define.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon rose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          </div>
+          <h3>Instant Escalation</h3>
+          <p>Alerts reach the right person via Telegram the moment something happens.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon dark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </div>
+          <h3>Conversational Refinement</h3>
+          <p>Click "False alarm?" on any alert, explain why, and the rule rewrites itself.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon dark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3>Shift Digest</h3>
+          <p>Get an AI-generated summary of incidents and trends from the last shift.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon dark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <h3>Works Anywhere</h3>
+          <p>Run locally for development or deploy with Docker in minutes.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Video demo -->
+    <section class="video-section" id="demo">
+      <div class="section-header">
+        <span class="section-label">Demo</span>
+        <h2 class="section-title">See Openeye in action</h2>
+      </div>
+      <div class="video-stage" id="videoStage">
+        <div class="video-frame">
+          <video id="demoVideo" controls playsinline poster="/static/openeye-demo-poster.jpg">
+            <source src="/static/openeye-demo.mp4" type="video/mp4" />
+          </video>
+          <button class="video-play-overlay" id="videoPlayBtn" aria-label="Play demo">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+        </div>
+      </div>
+      <p class="video-caption">9-second loop: warehouse scene, danger zone, worker breach, alert, Telegram notification.</p>
+    </section>
+
+    <!-- How to start -->
+    <section class="docs" id="docs">
+      <div class="section-header">
+        <span class="section-label">How to start</span>
+        <h2 class="section-title">Built for builders and operators</h2>
+      </div>
+      <div class="docs-grid">
+        <div class="doc-card">
+          <span class="doc-tag">Quickstart</span>
+          <h3>Run with Docker</h3>
+          <pre><code>docker compose up -d
+# Open http://localhost:5001</code></pre>
+          <p>One command and you have a working dashboard, detector, and alert pipeline.</p>
+        </div>
+        <div class="doc-card">
+          <span class="doc-tag">Rule syntax</span>
+          <h3>Write rules in English</h3>
+          <pre><code>"Alert if a person enters the danger zone"
+"Flag missing hard hat in the loading bay"
+"Call supervisor when forklift crosses line"</code></pre>
+          <p>Openeye uses Qwen3-VL to interpret the scene against your description.</p>
+        </div>
+        <div class="doc-card">
+          <span class="doc-tag">Integration</span>
+          <h3>Connect your services</h3>
+          <pre><code>DASHSCOPE_API_KEY=...
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...</code></pre>
+          <p>Add your Dashscope key for vision understanding, then add Telegram contacts and assign them to zones.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-band">
+      <div class="cta-band-inner">
+        <h2>Ready to make your cameras intelligent?</h2>
+        <p>Openeye is free to run locally. Start monitoring in minutes.</p>
+        <a href="/dashboard" class="btn btn-light">Open Dashboard &rarr;</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <svg class="brand-eye" viewBox="0 0 52 32" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 16 C7 8, 16 5, 26 5 C36 5, 45 8, 49 16 C45 24, 36 27, 26 27 C16 27, 7 24, 3 16Z" fill="currentColor"/>
+          <ellipse cx="26" cy="16" rx="15" ry="9" fill="#1C1917"/>
+          <circle cx="26" cy="16" r="7.5" fill="#BE123C"/>
+          <circle cx="26" cy="16" r="6" fill="#E11D48"/>
+          <circle cx="26" cy="16" r="3" fill="#0C0A09"/>
+        </svg>
+        <span>Openeye</span>
+      </div>
+      <p class="footer-credit">Developed by Dreamon</p>
+      <div class="footer-links">
+        <a href="/dashboard">Dashboard</a>
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/static/landing.js?v=4"></script>
+</body>
+</html>
