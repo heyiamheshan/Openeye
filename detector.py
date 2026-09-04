@@ -17,6 +17,7 @@ import urllib3
 from PIL import Image, ImageDraw
 
 import config
+import escalation
 import incident_log
 import rules_store
 import runtime_state
@@ -537,7 +538,9 @@ class DetectorThread(threading.Thread):
                                     (Path(config.ALERTS_DIR) / filename).write_bytes(evidence_bytes)
 
                                     alert = build_alert(rule_entry, result, filename, ts)
+                                    alert["rule_id"] = rule_entry.get("id")
                                     incident_log.log_incident(alert)
+                                    escalation.escalate_async(alert)
                                     with self._lock:
                                         self._alerts.appendleft(alert)
                                     self.queue.put(alert)

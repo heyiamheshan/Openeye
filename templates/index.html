@@ -56,6 +56,7 @@
           </svg>
         </span>
         <span class="brand-name">OpenEye</span>
+        <span class="tg-status-dot" id="tgStatusDot" title="Telegram: not configured"></span>
       </div>
       <nav class="main-nav" id="mainNav" aria-label="Main">
         <a href="#" class="nav-link active" data-view="dashboard">Dashboard</a>
@@ -123,6 +124,14 @@
           </div>
           <div class="control-actions">
             <button type="button" class="btn btn-ghost" id="drawZoneBtn">Draw zone</button>
+            <button type="button" class="btn btn-ghost" id="analyseSceneBtn">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>
+              </svg>
+              Analyse scene
+            </button>
             <button type="button" class="btn btn-ghost" id="uploadVideoBtn" hidden
                     title="Use your own video clip as the demo feed">
               <span class="btn-spinner" aria-hidden="true"></span>
@@ -162,6 +171,19 @@
         <!-- hidden input backing the demo Upload video button -->
         <input type="file" id="videoFileInput"
                accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo" hidden />
+
+        <!-- Scene Intelligence panel -->
+        <div class="card scene-panel" id="scenePanel" hidden>
+          <div class="scene-panel-head">
+            <h2 class="card-title" id="sceneTitle">Scene Intelligence</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="sceneDismissBtn">Dismiss</button>
+          </div>
+          <div class="scene-body" id="sceneBody"></div>
+          <div class="scene-actions" id="sceneActions" hidden>
+            <button type="button" class="btn btn-primary btn-sm" id="sceneApplyBtn">Add selected rules</button>
+          </div>
+          <p class="scene-confirm" id="sceneConfirm" hidden></p>
+        </div>
 
         <!-- zones: chips with rule-count badges + inline naming prompt -->
         <div class="card zones-card">
@@ -260,11 +282,38 @@
           <div class="rules-list" id="rulesList"></div>
         </div>
 
+        <!-- contacts (collapsible) -->
+        <div class="card contacts-card" id="contactsCard">
+          <div class="card-head contacts-head" id="contactsHead">
+            <h2 class="card-title">Telegram Alerts <span class="contact-count" id="contactCount">0</span></h2>
+            <svg class="contacts-chevron" id="contactsChevron" viewBox="0 0 16 16" width="14" height="14"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6l4 4 4-4"/></svg>
+          </div>
+          <div class="contacts-body" id="contactsBody" hidden>
+            <p class="contacts-intro">Alerts are sent to your Telegram when a rule triggers. Add your Telegram chat ID to receive notifications with the evidence frame attached.</p>
+            <div class="contacts-list" id="contactsList"></div>
+            <div class="contact-form">
+              <label class="contact-form-label">Add a recipient</label>
+              <input id="contactNameInput" type="text" placeholder="Name (e.g. Site Manager)" maxlength="40" autocomplete="off" />
+              <input id="contactChatInput" type="text" placeholder="Telegram chat ID (e.g. 6591305086)" maxlength="30" autocomplete="off" />
+              <select id="contactZoneSelect" title="Assign to zone">
+                <option value="">Default — all unzoned alerts</option>
+              </select>
+              <button type="button" class="btn btn-primary btn-sm" id="addContactBtn">Add</button>
+            </div>
+          </div>
+        </div>
+
         <!-- alerts -->
         <div class="card alerts-card">
           <div class="card-head">
             <h2 class="card-title">Alerts</h2>
             <span class="alert-count" id="alertCount">0</span>
+          </div>
+          <div class="no-contact-banner" id="noContactBanner" hidden>
+            <span class="no-contact-icon">&#9888;</span>
+            <span class="no-contact-text">No Telegram contact configured — alerts stay on dashboard only.</span>
+            <button type="button" class="btn btn-sm no-contact-add-btn" id="noContactAddBtn">Add contact</button>
           </div>
           <div class="alerts-list" id="alertsList"></div>
         </div>

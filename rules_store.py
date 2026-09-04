@@ -82,6 +82,18 @@ def set_enabled(rule_id: str, enabled: bool) -> bool:
         return False
 
 
+def update_rule_text(rule_id: str, new_text: str) -> dict | None:
+    """Replace the rule_text field. Returns the updated rule or None."""
+    with _lock:
+        rules = _load()
+        for r in rules:
+            if r["id"] == rule_id:
+                r["rule_text"] = new_text.strip()
+                _save(rules)
+                return r
+        return None
+
+
 def delete_rule(rule_id: str) -> bool:
     with _lock:
         rules = _load()

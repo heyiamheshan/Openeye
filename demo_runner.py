@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 
 import config
+import escalation
 import incident_log
 import zones_store
 from detector import _draw_zone_overlay, _evaluate_rule, build_alert
@@ -159,7 +160,9 @@ class DemoRunThread(threading.Thread):
                             (Path(config.ALERTS_DIR) / filename).write_bytes(evidence_bytes)
 
                             alert = build_alert(rule_entry, result, filename, ts)
+                            alert["rule_id"] = rule_entry.get("id")
                             incident_log.log_incident(alert)
+                            escalation.escalate_async(alert)
                             with self._lock:
                                 self._alerts.append(alert)
         finally:
