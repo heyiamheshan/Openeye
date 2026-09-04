@@ -49,7 +49,7 @@ def _set_delivery(success: bool | None, detail: str):
         _last_delivery["detail"] = detail
 
 
-def _format_caption(alert: dict) -> str:
+def format_caption(alert: dict) -> str:
     """Build the Telegram message caption from an alert record."""
     sev = (alert.get("severity") or "low").upper()
     prefix = "🚨 HIGH SEVERITY\n" if sev == "HIGH" else ""
@@ -174,7 +174,7 @@ def escalate(alert: dict):
         return
 
     # Build message and send
-    caption = _format_caption(alert)
+    caption = format_caption(alert)
     image_path = None
     if alert.get("id"):
         p = Path(config.ALERTS_DIR) / alert["id"]

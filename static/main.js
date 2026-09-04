@@ -81,6 +81,11 @@ const contactChatInput  = document.getElementById('contactChatInput');
 const contactZoneSelect = document.getElementById('contactZoneSelect');
 const addContactBtn     = document.getElementById('addContactBtn');
 
+// No-contact banner
+const noContactBanner  = document.getElementById('noContactBanner');
+const noContactAddBtn  = document.getElementById('noContactAddBtn');
+let _hasContacts = false;
+
 const digestHeaderBtnEl = document.getElementById('digestHeaderBtn');
 const digestBodyEl      = document.getElementById('digestBody');
 const digestChevronEl   = document.getElementById('digestChevron');
@@ -1195,6 +1200,7 @@ function confirmZoneName() {
       renderZoneList();
       syncZoneSelect();
       renderHistoryZoneChips();
+      refreshContactZoneDropdown();
       cancelDraw();
     })
     .catch(() => toast('Failed to save zone'));
@@ -1418,7 +1424,9 @@ function deleteZone(name) {
       delete savedZones[name];
       loadRules();
       renderZoneList();
+      syncZoneSelect();
       renderHistoryZoneChips();
+      refreshContactZoneDropdown();
       redraw();
     })
     .catch(() => toast('Failed to delete zone'));
@@ -1757,6 +1765,15 @@ function buildAlertRow(alert) {
   const top = el('div', 'alert-top');
   top.appendChild(el('span', 'alert-time', formatTime(alert.timestamp)));
   top.appendChild(el('span', `severity-badge sev-${sev}`, SEVERITY_LABEL[sev] || 'Low'));
+
+  // False alarm button (only if this alert has a rule_id)
+  if (alert.rule_id) {
+    const faBtn = el('button', 'refine-btn', 'False alarm?');
+    faBtn.type = 'button';
+    faBtn.title = 'Teach the system this was a false alarm';
+    faBtn.addEventListener('click', () => openRefineInput(alert, row));
+    top.appendChild(faBtn);
+  }
   body.appendChild(top);
 
   body.appendChild(el('p', 'alert-explanation', alert.explanation || ''));
@@ -1771,34 +1788,257 @@ function buildAlertRow(alert) {
   // Delivery status line
   const delivery = alert.delivery;
   if (delivery) {
-    let label = '', dotClass = '';
+    let label = '', dotClass = '', showSendBtn = false;
     if (delivery.suppressed) {
       label = 'Duplicate — not resent';
     } else if (delivery.success) {
       label = 'Telegram sent';
     } else if (delivery.detail === 'dashboard only') {
       label = 'Dashboard only';
+    } else if (delivery.detail === 'no contact configured') {
+      label = 'No contact — not sent';
+      dotClass = 'd-fail';
+      showSendBtn = true;
     } else {
       label = 'Telegram failed';
       dotClass = 'd-fail';
+      showSendBtn = true;
     }
     const dRow = el('div', 'alert-delivery');
     const dot = el('span', 'alert-delivery-dot' + (dotClass ? ' ' + dotClass : ''));
     dRow.appendChild(dot);
     dRow.appendChild(document.createTextNode(label));
+
+    // Send to Telegram button — visible for unsent alerts when contacts exist
+    if (showSendBtn && _hasContacts) {
+      const sendBtn = el('button', 'alert-send-btn', 'Send to Telegram');
+      sendBtn.type = 'button';
+      sendBtn.title = 'Send this alert to Telegram now';
+      sendBtn.addEventListener('click', () => _resendAlert(alert, sendBtn));
+      dRow.appendChild(sendBtn);
+    }
     body.appendChild(dRow);
+  } else {
+    // No delivery field at all — offer send button if contacts exist
+    if (_hasContacts) {
+      const dRow = el('div', 'alert-delivery');
+      const sendBtn = el('button', 'alert-send-btn', 'Send to Telegram');
+      sendBtn.type = 'button';
+      sendBtn.title = 'Send this alert to Telegram now';
+      sendBtn.addEventListener('click', () => _resendAlert(alert, sendBtn));
+      dRow.appendChild(sendBtn);
+      body.appendChild(dRow);
+    }
   }
 
   row.appendChild(body);
   return row;
 }
 
+function _resendAlert(alert, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  fetchJson('/alerts/resend', { method: 'POST', body: alert })
+    .then(d => {
+      if (d.success) {
+        btn.textContent = 'Sent \u2713';
+        btn.classList.add('sent');
+        toast('Alert sent to Telegram');
+      } else {
+        btn.textContent = 'Failed';
+        btn.classList.add('failed');
+        toast('Send failed: ' + (d.detail || 'unknown error'));
+        setTimeout(() => { btn.textContent = 'Send to Telegram'; btn.disabled = false; btn.classList.remove('failed'); }, 3000);
+      }
+      pollTelegramStatus();
+    })
+    .catch(err => {
+      btn.textContent = 'Send to Telegram';
+      btn.disabled = false;
+      toast(err.message || 'Failed to send');
+    });
+}
+
+// ── Conversational rule refinement ──────────────────────────────────────────
+
+let _refineState = null; // { alertId, phase, inputValue, revisedRule, changeSummary, originalRule, ruleId }
+
+function openRefineInput(alert, row) {
+  _refineState = {
+    alertId: alert.id,
+    ruleId: alert.rule_id,
+    originalRule: alert.rule,
+    explanation: alert.explanation || '',
+    phase: 'input',
+    inputValue: '',
+  };
+  _renderRefineUI(row);
+}
+
+function _renderRefineUI(row) {
+  // Remove any existing refine UI in this row
+  row.querySelectorAll('.refine-input-wrap, .refine-confirm').forEach(e => e.remove());
+  // Hide the false alarm button
+  const btn = row.querySelector('.refine-btn');
+  if (btn) btn.style.display = 'none';
+
+  const body = row.querySelector('.alert-body');
+  if (!body || !_refineState) return;
+
+  if (_refineState.phase === 'input') {
+    const wrap = el('div', 'refine-input-wrap');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'refine-input';
+    input.placeholder = 'Why was this a false alarm?';
+    input.value = _refineState.inputValue || '';
+    input.addEventListener('input', () => { _refineState.inputValue = input.value; });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') _submitRefine(row);
+    });
+    wrap.appendChild(input);
+
+    const submitBtn = el('button', 'btn btn-primary btn-sm refine-submit', 'Submit');
+    submitBtn.type = 'button';
+    submitBtn.addEventListener('click', () => _submitRefine(row));
+    wrap.appendChild(submitBtn);
+
+    const cancelBtn = el('button', 'btn btn-sm refine-cancel', 'Cancel');
+    cancelBtn.type = 'button';
+    cancelBtn.addEventListener('click', () => { _refineState = null; _renderRefineCleanup(row); });
+    wrap.appendChild(cancelBtn);
+
+    body.appendChild(wrap);
+    setTimeout(() => input.focus(), 50);
+  }
+
+  else if (_refineState.phase === 'loading') {
+    const wrap = el('div', 'refine-input-wrap');
+    wrap.appendChild(el('span', 'refine-loading', 'Asking the model…'));
+    body.appendChild(wrap);
+  }
+
+  else if (_refineState.phase === 'confirm') {
+    const panel = el('div', 'refine-confirm');
+
+    const oldRow = el('div', 'refine-row');
+    oldRow.appendChild(el('span', 'refine-label', 'Old'));
+    oldRow.appendChild(el('span', 'refine-text old', _refineState.originalRule));
+    panel.appendChild(oldRow);
+
+    const newRow = el('div', 'refine-row');
+    newRow.appendChild(el('span', 'refine-label', 'New'));
+    const editInput = document.createElement('input');
+    editInput.type = 'text';
+    editInput.className = 'refine-edit';
+    editInput.value = _refineState.revisedRule;
+    editInput.addEventListener('input', () => { _refineState.revisedRule = editInput.value; });
+    newRow.appendChild(editInput);
+    panel.appendChild(newRow);
+
+    if (_refineState.changeSummary) {
+      panel.appendChild(el('p', 'refine-summary', _refineState.changeSummary));
+    }
+
+    const actions = el('div', 'refine-actions');
+    const applyBtn = el('button', 'btn btn-primary btn-sm', 'Apply');
+    applyBtn.type = 'button';
+    applyBtn.addEventListener('click', () => _applyRefine(row));
+    actions.appendChild(applyBtn);
+
+    const cancelBtn = el('button', 'btn btn-sm refine-cancel', 'Cancel');
+    cancelBtn.type = 'button';
+    cancelBtn.addEventListener('click', () => { _refineState = null; _renderRefineCleanup(row); });
+    actions.appendChild(cancelBtn);
+
+    panel.appendChild(actions);
+    body.appendChild(panel);
+  }
+
+  else if (_refineState.phase === 'error') {
+    const wrap = el('div', 'refine-input-wrap');
+    wrap.appendChild(el('span', 'refine-error', _refineState.error || 'Something went wrong'));
+    const retryBtn = el('button', 'btn btn-sm refine-cancel', 'Dismiss');
+    retryBtn.type = 'button';
+    retryBtn.addEventListener('click', () => { _refineState = null; _renderRefineCleanup(row); });
+    wrap.appendChild(retryBtn);
+    body.appendChild(wrap);
+  }
+}
+
+function _renderRefineCleanup(row) {
+  row.querySelectorAll('.refine-input-wrap, .refine-confirm').forEach(e => e.remove());
+  const btn = row.querySelector('.refine-btn');
+  if (btn) btn.style.display = '';
+}
+
+function _submitRefine(row) {
+  if (!_refineState || !_refineState.inputValue.trim()) {
+    toast('Please explain why this was a false alarm');
+    return;
+  }
+  _refineState.phase = 'loading';
+  _renderRefineCleanup(row);
+  _renderRefineUI(row);
+
+  fetchJson('/rules/refine', {
+    method: 'POST',
+    body: {
+      original_rule: _refineState.originalRule,
+      explanation: _refineState.explanation,
+      user_correction: _refineState.inputValue,
+    },
+  })
+    .then(d => {
+      if (!_refineState) return; // user cancelled
+      _refineState.phase = 'confirm';
+      _refineState.revisedRule = d.revised_rule;
+      _refineState.changeSummary = d.change_summary;
+      // Re-render the UI on the current row
+      const currentRow = row.isConnected ? row : document.querySelector(`.alert-row`);
+      if (currentRow) { _renderRefineCleanup(currentRow); _renderRefineUI(currentRow); }
+    })
+    .catch(err => {
+      if (!_refineState) return;
+      _refineState.phase = 'error';
+      _refineState.error = (err && err.message) || 'Failed to refine';
+      const currentRow = row.isConnected ? row : document.querySelector(`.alert-row`);
+      if (currentRow) { _renderRefineCleanup(currentRow); _renderRefineUI(currentRow); }
+    });
+}
+
+function _applyRefine(row) {
+  if (!_refineState) return;
+  const ruleId = _refineState.ruleId;
+  const revisedRule = _refineState.revisedRule;
+
+  fetchJson(`/rules/${encodeURIComponent(ruleId)}/text`, {
+    method: 'PUT',
+    body: { rule_text: revisedRule },
+  })
+    .then(() => {
+      toast('Rule updated');
+      loadRules();
+      _refineState = null;
+      _renderRefineCleanup(row);
+    })
+    .catch(() => toast('Failed to update rule'));
+}
+
 function renderAlerts() {
+  // While a refine is in progress, skip rebuilding the DOM to keep the input stable
+  if (_refineState) {
+    alertCountEl.textContent = currentAlerts.length;
+    currentAlerts.forEach(a => { if (a.id) seenAlertIds.add(a.id); });
+    return;
+  }
+
   alertsListEl.innerHTML = '';
   alertCountEl.textContent = currentAlerts.length;
 
   if (currentAlerts.length === 0) {
     alertsListEl.appendChild(el('p', 'empty-state', 'No alerts yet — they will appear here while monitoring'));
+    _refineState = null; // clear refine if alerts gone
     return;
   }
 
@@ -1808,6 +2048,18 @@ function renderAlerts() {
 
   // everything rendered is now "seen" — future polls re-render without animating
   currentAlerts.forEach(a => { if (a.id) seenAlertIds.add(a.id); });
+
+  // Restore refine UI if one is in progress
+  if (_refineState && _refineState.alertId) {
+    const rows = alertsListEl.querySelectorAll('.alert-row');
+    for (const row of rows) {
+      const thumb = row.querySelector('.alert-thumb');
+      if (thumb && thumb.src && thumb.src.includes(_refineState.alertId)) {
+        _renderRefineUI(row);
+        break;
+      }
+    }
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2300,6 +2552,8 @@ function pollTelegramStatus() {
   fetchJson('/telegram/status')
     .then(d => {
       tgStatusDot.classList.remove('tg-ok', 'tg-fail', 'tg-unconf');
+      _hasContacts = !!d.has_contacts;
+
       if (!d.configured) {
         tgStatusDot.classList.add('tg-unconf');
         tgStatusDot.title = 'Telegram: not configured';
@@ -2313,11 +2567,28 @@ function pollTelegramStatus() {
         tgStatusDot.classList.add('tg-unconf');
         tgStatusDot.title = 'Telegram: awaiting first alert';
       }
+
+      // Show/hide no-contact banner
+      if (noContactBanner) {
+        noContactBanner.hidden = _hasContacts;
+      }
     })
     .catch(() => {});
 }
 pollTelegramStatus();
 setInterval(pollTelegramStatus, 10000);
+
+// Banner "Add contact" button — expand the contacts card
+if (noContactAddBtn) {
+  noContactAddBtn.addEventListener('click', () => {
+    _contactsExpanded = true;
+    contactsBody.hidden = false;
+    contactsCard.classList.add('expanded');
+    refreshContactZoneDropdown();
+    contactNameInput.focus();
+    contactsCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
 
 // ── Contacts card ────────────────────────────────────────────────────────────
 
@@ -2327,16 +2598,19 @@ contactsHead.addEventListener('click', () => {
   _contactsExpanded = !_contactsExpanded;
   contactsBody.hidden = !_contactsExpanded;
   contactsCard.classList.toggle('expanded', _contactsExpanded);
+  if (_contactsExpanded) refreshContactZoneDropdown();
 });
 
 function loadContacts() {
   return fetchJson('/contacts')
     .then(d => {
       const contacts = d.contacts || [];
+      _hasContacts = contacts.length > 0;
+      if (noContactBanner) noContactBanner.hidden = _hasContacts;
       contactCount.textContent = contacts.length;
       contactsList.innerHTML = '';
       if (!contacts.length) {
-        contactsList.appendChild(el('p', 'empty-state', 'No contacts — alerts use the default chat ID'));
+        contactsList.appendChild(el('p', 'empty-state', 'No contacts yet — add your Telegram chat ID to receive alert notifications'));
         return;
       }
       contacts.forEach(c => {
@@ -2383,7 +2657,8 @@ addContactBtn.addEventListener('click', () => {
     method: 'POST',
     body: { name, telegram_chat_id: chatId, zone_name: zoneName },
   })
-    .then(() => {
+    .then(d => {
+      if (d.error) { toast(d.error); return; }
       contactNameInput.value = '';
       contactChatInput.value = '';
       contactZoneSelect.value = '';

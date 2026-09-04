@@ -58,19 +58,11 @@ def delete_contact(contact_id: str) -> bool:
 
 def get_contact_for_zone(zone_name: str | None) -> dict | None:
     """Returns the contact whose zone_name matches, falling back to the first
-    contact with zone_name=null.  If the store is empty, returns a synthetic
-    default built from TELEGRAM_CHAT_ID."""
+    contact with zone_name=null.  Returns None if no contacts are configured."""
     with _lock:
         contacts = _load()
 
     if not contacts:
-        if config.TELEGRAM_CHAT_ID:
-            return {
-                "id": "default",
-                "name": "Default",
-                "telegram_chat_id": config.TELEGRAM_CHAT_ID,
-                "zone_name": None,
-            }
         return None
 
     # Exact zone match

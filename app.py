@@ -1,5 +1,8 @@
+import json
+import logging
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -12,6 +15,7 @@ import config
 import contacts_store
 import escalation
 import incident_log
+import notifiers
 import rules_store
 import runtime_state
 import scene_analyst
@@ -21,6 +25,9 @@ from detector import DetectorThread
 app = Flask(__name__)
 Path(config.ALERTS_DIR).mkdir(exist_ok=True)
 Path(config.UPLOADS_DIR).mkdir(exist_ok=True)
+Path("logs").mkdir(exist_ok=True)
+
+log = logging.getLogger(__name__)
 
 ALLOWED_VIDEO_EXTS = {"mp4", "mov", "avi"}
 DEMO_SAMPLE_PATH = "demo/sample.mp4"
@@ -293,6 +300,113 @@ def remove_rule(rule_id):
     return jsonify(ok=True)
 
 
+@app.route("/rules/<path:rule_id>/text", methods=["PUT"])
+def update_rule_text(rule_id):
+    """Update a rule's text — used when applying a refinement."""
+    data = request.get_json(silent=True) or {}
+    new_text = (data.get("rule_text") or "").strip()
+    if not new_text:
+        return jsonify(error="rule_text is required"), 400
+    updated = rules_store.update_rule_text(rule_id, new_text)
+    if not updated:
+        return jsonify(error="Rule not found"), 404
+    return jsonify(ok=True, rule=updated)
+
+
+_REFINE_PROMPT = """\
+A monitoring rule produced a false alarm. \
+Original rule: {original_rule}. \
+What the system reported: {explanation}. \
+The user says this was a false alarm because: {user_correction}. \
+Rewrite the rule so it still catches genuine cases but excludes this situation. \
+Keep it as a single state-based sentence suitable for single-frame image analysis. \
+Respond ONLY with JSON: {{"revised_rule": string, "change_summary": one sentence explaining what changed}}."""
+
+_REFINE_LOG = Path("logs") / "refinements.jsonl"
+_refine_lock = threading.Lock()
+
+
+def _log_refinement(entry: dict):
+    """Append a refinement record to logs/refinements.jsonl."""
+    with _refine_lock:
+        with open(_REFINE_LOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+
+@app.route("/rules/refine", methods=["POST"])
+def refine_rule():
+    """Send original rule + explanation + user correction to the text model,
+    return a proposed revision."""
+    data = request.get_json(silent=True) or {}
+    original_rule = (data.get("original_rule") or "").strip()
+    explanation = (data.get("explanation") or "").strip()
+    user_correction = (data.get("user_correction") or "").strip()
+
+    if not original_rule or not user_correction:
+        return jsonify(error="original_rule and user_correction are required"), 400
+
+    prompt = _REFINE_PROMPT.format(
+        original_rule=original_rule,
+        explanation=explanation or "(no explanation available)",
+        user_correction=user_correction,
+    )
+
+    headers = {
+        "Authorization": f"Bearer {config.DASHSCOPE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.TEXT_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        try:
+            resp = requests.post(
+                f"{config.API_BASE_URL}/chat/completions",
+                headers=headers, json=payload, timeout=30,
+            )
+        except requests.exceptions.SSLError:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            resp = requests.post(
+                f"{config.API_BASE_URL}/chat/completions",
+                headers=headers, json=payload, timeout=30, verify=False,
+            )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        log.error("Refine VLM request failed: %s", exc)
+        return jsonify(error="Failed to contact the model"), 502
+
+    raw = resp.json()["choices"][0]["message"]["content"].strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        log.error("Refine model returned invalid JSON: %s", raw[:300])
+        return jsonify(error="Model returned invalid response"), 502
+
+    revised = (result.get("revised_rule") or "").strip()
+    summary = (result.get("change_summary") or "").strip()
+    if not revised:
+        return jsonify(error="Model did not produce a revised rule"), 502
+
+    # Log the refinement (applied=false until user confirms)
+    _log_refinement({
+        "timestamp": datetime.now().isoformat(),
+        "original_rule": original_rule,
+        "explanation": explanation,
+        "user_correction": user_correction,
+        "revised_rule": revised,
+        "change_summary": summary,
+        "applied": False,
+    })
+
+    return jsonify(revised_rule=revised, change_summary=summary)
+
+
 @app.route("/incidents")
 def get_incidents_route():
     """Alert history: logged incident records, newest-last. Severity is
@@ -529,6 +643,15 @@ def create_contact():
     if not name or not chat_id:
         return jsonify(error="name and telegram_chat_id are required"), 400
     zone_name = (data.get("zone_name") or "").strip() or None
+
+    # Validate no duplicate name or chat_id
+    existing = contacts_store.get_contacts()
+    for c in existing:
+        if c.get("name", "").lower() == name.lower():
+            return jsonify(error=f"A contact named '{name}' already exists"), 409
+        if c.get("telegram_chat_id") == chat_id:
+            return jsonify(error=f"Chat ID {chat_id} is already assigned to '{c.get('name', '?')}'"), 409
+
     contact = contacts_store.add_contact(name, chat_id, zone_name)
     return jsonify(ok=True, contact=contact)
 
@@ -546,7 +669,35 @@ def telegram_status():
     """Returns the last Telegram delivery status for the header indicator."""
     status = escalation.get_last_delivery()
     configured = bool(config.TELEGRAM_BOT_TOKEN and config.ESCALATION_ENABLED)
-    return jsonify(configured=configured, **status)
+    has_contacts = bool(contacts_store.get_contacts())
+    return jsonify(configured=configured, has_contacts=has_contacts, **status)
+
+
+@app.route("/alerts/resend", methods=["POST"])
+def resend_alert():
+    """Manually send an alert to Telegram — bypasses dedup cooldown.
+    Accepts the full alert record from the frontend."""
+    data = request.get_json(silent=True) or {}
+    zone = data.get("zone")
+
+    contact = contacts_store.get_contact_for_zone(zone)
+    if not contact:
+        return jsonify(success=False, detail="no contact configured"), 400
+
+    chat_id = contact.get("telegram_chat_id", "")
+    if not chat_id:
+        return jsonify(success=False, detail="contact has no chat id"), 400
+
+    # Build caption from the alert data
+    caption = escalation.format_caption(data)
+    image_path = None
+    if data.get("id"):
+        p = Path(config.ALERTS_DIR) / data["id"]
+        if p.exists():
+            image_path = str(p)
+
+    result = notifiers.send_telegram(chat_id, caption, image_path)
+    return jsonify(**result)
 
 
 if __name__ == "__main__":
