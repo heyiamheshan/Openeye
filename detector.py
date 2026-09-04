@@ -448,6 +448,10 @@ def build_alert(rule_entry: dict, result: dict, filename: str, ts: datetime) -> 
         alert["proximity"] = result.get("proximity")
         alert["subject_bbox"] = result.get("subject_bbox")
         alert["hazard_bbox"] = result.get("hazard_bbox")
+    alert["severity"] = incident_log.classify_severity(
+        alert["rule"], alert["explanation"], alert["confidence"],
+        alert["rule_type"], alert.get("proximity"),
+    )
     return alert
 
 

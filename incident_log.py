@@ -9,17 +9,74 @@ _LOG_DIR = Path("logs")
 _LOG_FILE = _LOG_DIR / "incidents.jsonl"
 _lock = threading.Lock()
 
+# Keyword + confidence severity classification. Danger keywords (fire, smoke,
+# collapse, missing helmet, physical contact …) escalate straight to high;
+# policy keywords (loitering, unattended, running …) sit at medium. Whatever
+# the keywords say, a high-confidence detection can lift the result one tier.
+SEVERITY_HIGH_KEYWORDS = (
+    "fire", "smoke", "flame", "collapsed", "collapse", "lying on the floor",
+    "lying on floor", "lying down", "fallen", "fell", "faint", "unconscious",
+    "injur", "bleeding", "blood", "trapped", "stuck", "crushed",
+    "intruder", "unauthorized", "trespass", "weapon", "knife", "gun",
+    "no helmet", "without a helmet", "without helmet", "not wearing a helmet",
+    "helmet missing", "missing helmet", "bare head",
+    "touching", "in contact", "physical contact", "very close",
+    "crash", "collision", "spill", "wet floor", "blocked exit",
+    "exposed wire", "electric shock", "overflow",
+)
+SEVERITY_MEDIUM_KEYWORDS = (
+    "running", "loitering", "loiter", "unattended", "left behind",
+    "missing", "not wearing", "absent", "door left open", "open door",
+    "near", "close to", "reversing", "parked", "illegal", "queue",
+    "gathered", "crowd", "empty", "uncleared", "blocked", "obstruct",
+    "present in the frame", "visible",
+)
+
+_SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+
+def classify_severity(
+    rule_text: str = "",
+    explanation: str = "",
+    confidence: float = 0.0,
+    rule_type: str = "standard",
+    proximity: str | None = None,
+) -> str:
+    """Returns 'high' | 'medium' | 'low' for an alert, combining keyword
+    matching over the rule text + explanation with the confidence score
+    (each contributes a tier; the higher tier wins)."""
+    text = f"{rule_text} {explanation}".lower()
+    if proximity:
+        text += f" {str(proximity).replace('_', ' ')}"
+
+    if any(k in text for k in SEVERITY_HIGH_KEYWORDS):
+        keyword_tier = "high"
+    elif any(k in text for k in SEVERITY_MEDIUM_KEYWORDS):
+        keyword_tier = "medium"
+    else:
+        keyword_tier = "low"
+
+    conf = float(confidence or 0.0)
+    if conf >= 0.9:
+        conf_tier = "high"
+    elif conf >= 0.7:
+        conf_tier = "medium"
+    else:
+        conf_tier = "low"
+
+    return max((keyword_tier, conf_tier), key=lambda t: _SEVERITY_ORDER[t])
+
 
 def _compute_severity(alert: dict) -> str:
-    confidence = float(alert.get("confidence", 0.0))
-    is_proximity_touching = (
-        alert.get("rule_type") == "proximity" and alert.get("proximity") == "touching"
+    if alert.get("severity"):
+        return alert["severity"]
+    return classify_severity(
+        alert.get("rule", ""),
+        alert.get("explanation", ""),
+        alert.get("confidence", 0.0),
+        alert.get("rule_type", "standard"),
+        alert.get("proximity"),
     )
-    if confidence > 0.85 and is_proximity_touching:
-        return "high"
-    if confidence > 0.7:
-        return "medium"
-    return "low"
 
 
 def log_incident(alert: dict) -> dict:
