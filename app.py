@@ -1,6 +1,5 @@
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -14,7 +13,6 @@ import incident_log
 import rules_store
 import runtime_state
 import zones_store
-from demo_runner import DemoRunThread
 from detector import DetectorThread
 
 app = Flask(__name__)
@@ -26,10 +24,6 @@ DEMO_SAMPLE_PATH = "demo/sample.mp4"
 
 _detector_thread: DetectorThread | None = None
 _detector_lock = threading.Lock()
-
-_demo_run_thread: DemoRunThread | None = None
-_demo_run_lock = threading.Lock()
-_demo_run_started_at: str | None = None  # ISO timestamp — used to scope the digest to "this run"
 
 _camera_lock = threading.Lock()
 _camera: cv2.VideoCapture | None = None
@@ -117,30 +111,6 @@ def current_frame():
     return Response(buf.tobytes(), mimetype="image/jpeg")
 
 
-@app.route("/demo_run/current_frame")
-def demo_run_current_frame():
-    """A real frame straight from the loaded demo video, independent of the
-    live/demo runtime_state flag — used so zones can be drawn against an
-    actual demo-video frame instead of the live webcam or a placeholder."""
-    path = runtime_state.get_video_path()
-    if not path:
-        return jsonify(error="No demo video loaded"), 404
-    cap = _get_demo_camera()
-    if cap is None or not cap.isOpened():
-        return jsonify(error="Cannot open demo video"), 503
-    with _demo_lock:
-        ok, frame = cap.read()
-        if not ok:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ok, frame = cap.read()
-    if not ok:
-        return jsonify(error="Failed to read frame from demo video"), 503
-    ok, buf = cv2.imencode(".jpg", frame)
-    if not ok:
-        return jsonify(error="Failed to encode frame"), 503
-    return Response(buf.tobytes(), mimetype="image/jpeg")
-
-
 @app.route("/demo_mode", methods=["GET", "POST"])
 def demo_mode_route():
     if request.method == "POST":
@@ -168,73 +138,24 @@ def upload_video():
     return jsonify(ok=True, video_path=str(filepath))
 
 
+@app.route("/uploads/<path:filename>")
+def uploaded_video(filename):
+    """Serves uploaded clips so the demo feed can display the analyzed video."""
+    return send_from_directory(config.UPLOADS_DIR, filename)
+
+
+@app.route("/demo/<path:filename>")
+def demo_asset(filename):
+    """Serves the bundled sample clip so the demo <video> element can play it."""
+    return send_from_directory("demo", filename)
+
+
 @app.route("/demo_run/load_sample", methods=["POST"])
 def load_sample_video():
     if not Path(DEMO_SAMPLE_PATH).exists():
         return jsonify(error="Sample video not found on server"), 404
     runtime_state.set_video_path(DEMO_SAMPLE_PATH)
     return jsonify(ok=True, video_path=DEMO_SAMPLE_PATH)
-
-
-@app.route("/demo_run/start", methods=["POST"])
-def demo_run_start():
-    global _demo_run_thread, _demo_run_started_at
-    all_rules = rules_store.get_rules()
-    print(f"[demo_run_start] all rules in rules_store ({len(all_rules)}):")
-    for r in all_rules:
-        print(
-            f"  id={r.get('id')} text={r.get('rule_text')!r} enabled={r.get('enabled')} "
-            f"rule_type={r.get('rule_type')} zone_name={r.get('zone_name')!r}"
-        )
-    enabled_rules = rules_store.get_enabled_rules()
-    print(f"[demo_run_start] enabled_rules passed to DemoRunThread ({len(enabled_rules)}): {enabled_rules}")
-    if not enabled_rules:
-        print("[demo_run_start] REJECTED — no enabled rules, refusing to start a run against nothing")
-        return jsonify(error="No enabled rules — add a rule before starting analysis"), 400
-    video_path = runtime_state.get_video_path()
-    print(f"[demo_run_start] video_path={video_path!r}")
-    if not video_path or not Path(video_path).exists():
-        return jsonify(error="No video loaded"), 400
-
-    with _demo_run_lock:
-        if _demo_run_thread is not None and _demo_run_thread.is_alive() and not _demo_run_thread.done:
-            return jsonify(error="A demo run is already in progress"), 409
-        _demo_run_started_at = datetime.now().isoformat(timespec="seconds")
-        _demo_run_thread = DemoRunThread(enabled_rules, video_path)
-        _demo_run_thread.start()
-
-    return jsonify(ok=True)
-
-
-@app.route("/demo_run/status")
-def demo_run_status():
-    with _demo_run_lock:
-        thread = _demo_run_thread
-    if thread is None:
-        return jsonify(active=False)
-    status = thread.get_status()
-    status["active"] = True
-    return jsonify(status)
-
-
-@app.route("/demo_run/frame")
-def demo_run_frame():
-    with _demo_run_lock:
-        thread = _demo_run_thread
-    if thread is None:
-        return jsonify(error="No demo run"), 404
-    frame = thread.get_current_frame()
-    if frame is None:
-        return jsonify(error="No frame yet"), 503
-    return Response(frame, mimetype="image/jpeg")
-
-
-@app.route("/demo_run/cancel", methods=["POST"])
-def demo_run_cancel():
-    with _demo_run_lock:
-        if _demo_run_thread is not None:
-            _demo_run_thread.cancel()
-    return jsonify(ok=True)
 
 
 @app.route("/start", methods=["POST"])
@@ -371,18 +292,48 @@ def remove_rule(rule_id):
 
 @app.route("/incidents")
 def get_incidents_route():
+    """Alert history: logged incident records, newest-last. Severity is
+    backfilled for older records (written before keyword+confidence
+    classification existed), and frame_path is mapped to a servable URL."""
     since = request.args.get("since")
     zone = request.args.get("zone")
     severity = request.args.get("severity")
     incidents = incident_log.get_incidents(since=since, zone=zone, severity=severity)
-    return jsonify(incidents=incidents)
+    out = []
+    for r in incidents:
+        rec = dict(r)
+        if not rec.get("severity"):
+            rec["severity"] = incident_log.classify_severity(
+                rec.get("rule_text", ""), rec.get("explanation", ""),
+                rec.get("confidence", 0.0), rec.get("rule_type", "standard"),
+            )
+        if rec.get("frame_path"):
+            rec["thumbnail"] = "/alerts/" + Path(rec["frame_path"]).name
+        out.append(rec)
+    return jsonify(incidents=out)
 
 
-@app.route("/digest/stats")
-def digest_stats():
-    since = request.args.get("since")
-    records = incident_log.get_incidents(since=since) if since else incident_log.get_recent(24)
-    return jsonify(ok=True, stats=incident_log.compute_stats(records))
+def _clamp_hours(value, default: int = 24) -> int:
+    try:
+        hours = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(hours, 168))
+
+
+@app.route("/digest/json")
+def digest_json():
+    """Shift-digest statistics: period_hours, total, by_zone, by_severity,
+    busiest_hour for the requested look-back window (default 24h)."""
+    hours = _clamp_hours(request.args.get("hours", 24))
+    stats = incident_log.compute_stats(incident_log.get_recent(hours))
+    return jsonify(
+        period_hours=hours,
+        total=stats["total"],
+        by_zone=stats["by_zone"],
+        by_severity=stats["by_severity"],
+        busiest_hour=stats["busiest_hour"],
+    )
 
 
 DIGEST_PROMPT_TEMPLATE = (
@@ -408,33 +359,40 @@ DIGEST_PROMPT_TEMPLATE = (
 )
 
 
-@app.route("/digest/generate", methods=["POST"])
-def digest_generate():
+def _period_label(hours: int) -> str:
+    return f"the last {hours} hour" + ("s" if hours != 1 else "")
+
+
+def _digest_summary(stats: dict, hours: int) -> str:
+    sev = stats.get("by_severity", {})
+    return (
+        f"{stats.get('total', 0)} incident{'s' if stats.get('total', 0) != 1 else ''} "
+        f"in {_period_label(hours)} — "
+        f"{sev.get('high', 0)} high, {sev.get('medium', 0)} medium, "
+        f"{sev.get('low', 0)} low."
+    )
+
+
+@app.route("/digest/ai", methods=["POST"])
+def digest_ai():
+    """Generates the AI shift digest for the requested window (default 24h).
+    Returns a one-line factual summary plus the generated digest text."""
     data = request.get_json(silent=True) or {}
-    scope = data.get("scope") or "24h"
-    if scope not in ("24h", "demo_run"):
-        return jsonify(error="Invalid scope"), 400
+    hours = _clamp_hours(data.get("hours", 24))
 
-    if scope == "demo_run":
-        if not _demo_run_started_at:
-            return jsonify(ok=True, message="No demo run has been started yet.", digest=None, stats=incident_log.compute_stats([]))
-        records = incident_log.get_incidents(since=_demo_run_started_at)
-        period = "the current demo run"
-    else:
-        records = incident_log.get_recent(24)
-        period = "the last 24 hours"
-
+    records = incident_log.get_recent(hours)
     stats = incident_log.compute_stats(records)
 
     if not records:
-        no_incidents_message = (
-            "No incidents recorded in the current demo run." if scope == "demo_run"
-            else "No incidents recorded in the last 24 hours."
+        return jsonify(
+            ok=True,
+            summary=f"No incidents recorded in {_period_label(hours)}.",
+            digest=None,
+            stats=stats,
         )
-        return jsonify(ok=True, message=no_incidents_message, digest=None, stats=stats)
 
     log_text = incident_log.build_digest_log_text(records)
-    prompt = DIGEST_PROMPT_TEMPLATE.format(log_text=log_text, period=period)
+    prompt = DIGEST_PROMPT_TEMPLATE.format(log_text=log_text, period=_period_label(hours))
 
     payload = {
         "model": config.TEXT_MODEL,
@@ -459,7 +417,12 @@ def digest_generate():
     except Exception as exc:
         return jsonify(error=f"Digest generation failed: {exc}", stats=stats), 502
 
-    return jsonify(ok=True, digest=digest_text, stats=stats)
+    return jsonify(
+        ok=True,
+        summary=_digest_summary(stats, hours),
+        digest=digest_text,
+        stats=stats,
+    )
 
 
 if __name__ == "__main__":

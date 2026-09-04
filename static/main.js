@@ -1,139 +1,792 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // OpenEye — main.js
-// Feed: live MJPEG or canvas-rendered demo scenes streamed into a video player.
+// Feed: live MJPEG, a procedurally animated demo scene rendered on a hidden
+// 1280×720 canvas and streamed into a <video> via captureStream(30), or an
+// uploaded clip that replaces the scene (backend analyzes it after upload).
 // Zone drawing: Draw zone freezes the feed → draw a shape (rect/poly/circle)
-// → drag to reposition → name it → saved to the backend.
-// Rules: managed as a frontend list, combined into one rule string on Start.
+// → drag to reposition → name it → persisted to the backend.
+// Rules: synced with the backend store; enabled rules are combined into one
+// rule string ("text in the zone zone") and POSTed to /start.
+// Alerts: polled from /alerts/json every 2s with severity badges; new alerts
+// animate in. Shift Digest: /digest/json + /digest/ai. History: /incidents.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const feedImg     = document.getElementById('cameraFeed');
-const demoVideo   = document.getElementById('demoVideo');
-const sceneCanvas = document.getElementById('demoSceneCanvas');
-const sceneCtx    = sceneCanvas.getContext('2d');
-const canvas      = document.getElementById('zoneCanvas');
-const ctx         = canvas.getContext('2d');
-const drawBtn     = document.getElementById('drawZoneBtn');
-const hintEl      = document.getElementById('drawHint');
-const promptEl    = document.getElementById('zoneNamePrompt');
-const nameInput   = document.getElementById('zoneNameInput');
-const frameEl     = document.getElementById('cameraFrame');
+const feedImg       = document.getElementById('cameraFeed');
+const demoVideo     = document.getElementById('demoVideo');
+const sceneCanvas   = document.getElementById('demoSceneCanvas');
+const sceneCtx      = sceneCanvas.getContext('2d');
+const canvas        = document.getElementById('zoneCanvas');
+const ctx           = canvas.getContext('2d');
+const drawBtn       = document.getElementById('drawZoneBtn');
+const hintEl        = document.getElementById('drawHint');
+const promptEl      = document.getElementById('zoneNamePrompt');
+const nameInput     = document.getElementById('zoneNameInput');
+const frameEl       = document.getElementById('cameraFrame');
 const frozenFrameEl = document.getElementById('frozenFrame');
+const cameraOverlayEl = document.getElementById('cameraOverlay');
+const feedTagEl       = document.getElementById('feedTag');
+const feedTagTextEl   = document.getElementById('feedTagText');
+
+const startBtn   = document.getElementById('startBtn');
+const stopBtn    = document.getElementById('stopBtn');
+const uploadVideoBtn = document.getElementById('uploadVideoBtn');
+const useSampleBtn   = document.getElementById('useSampleBtn');
+const sampleSceneBtn = document.getElementById('sampleSceneBtn');
+const videoFileInput = document.getElementById('videoFileInput');
+const statusBadgeEl = document.getElementById('statusBadge');
+const statusLabelEl = document.getElementById('statusLabel');
+
+const zonesListEl = document.getElementById('zonesList');
+const zonesSubEl  = document.getElementById('zonesSub');
+
+const rulesCardEl  = document.getElementById('rulesCard');
+const rulesListEl  = document.getElementById('rulesList');
+const rulesSubEl   = document.getElementById('rulesSub');
+const ruleInputEl  = document.getElementById('ruleInput');
+const zoneSelectEl = document.getElementById('zoneSelect');
+const addRuleBtnEl = document.getElementById('addRuleBtn');
+
+const alertCountEl = document.getElementById('alertCount');
+const alertsListEl = document.getElementById('alertsList');
+
+const digestHeaderBtnEl = document.getElementById('digestHeaderBtn');
+const digestBodyEl      = document.getElementById('digestBody');
+const digestChevronEl   = document.getElementById('digestChevron');
+const digestSubtitleEl  = document.getElementById('digestSubtitle');
+const digestStatsEl     = document.getElementById('digestStats');
+const generateDigestBtn = document.getElementById('generateDigestBtn');
+const aiDigestCardEl    = document.getElementById('aiDigestCard');
+const aiDigestSubtitleEl = document.getElementById('aiDigestSubtitle');
+const aiDigestResultEl  = document.getElementById('aiDigestResult');
+
+digestHeaderBtnEl.addEventListener('click', () => {
+  const expanding = digestBodyEl.hidden;
+  digestBodyEl.hidden = !expanding;
+  digestChevronEl.textContent = expanding ? '▲' : '▼';
+});
+
+const dashboardViewEl = document.getElementById('dashboardView');
+const historyViewEl   = document.getElementById('historyView');
+const historyRangeEl  = document.getElementById('historyRange');
+const severityChipsEl = document.getElementById('severityChips');
+const zoneChipsEl     = document.getElementById('zoneChips');
+const historyListEl   = document.getElementById('historyList');
+const historyCountEl  = document.getElementById('historyCount');
+
+const lightboxBackdropEl = document.getElementById('lightboxBackdrop');
+const lightboxImgEl      = document.getElementById('lightboxImg');
+const lightboxExplEl     = document.getElementById('lightboxExplanation');
+const lightboxMetaEl     = document.getElementById('lightboxMeta');
+
+const toastEl = document.getElementById('toast');
 
 // ── constants ─────────────────────────────────────────────────────────────────
-const ROSE_FILL      = 'rgba(254,242,242,0.30)';   // zone-red-50 @ 30% opacity
-const ROSE_FILL_MOVE = 'rgba(254,242,242,0.45)';
-const ROSE_STROKE    = '#FCA5A5';                  // zone-red-300
-const ROSE_LABEL     = '#DC2626';                  // zone-red-600
+const ACCENT        = '#E11D48';
+const ZONE_FILL         = 'rgba(225,29,72,0.14)';   // in-progress draw preview
+const ZONE_FILL_MOVE    = 'rgba(225,29,72,0.22)';
+const ZONE_STROKE       = '#FDA4AF';                // accent-300
+const ZONE_SAVED_FILL   = 'rgba(225,29,72,0.26)';   // saved zones — bolder
+const ZONE_SAVED_STROKE = '#E11D48';
+const HANDLE_R    = 6;
+const CIRCLE_SEGS = 48;      // circles are stored as 48-point polygon approximations
+const DEMO_W      = 1280;
+const DEMO_H      = 720;
 
-// saved (persisted) zones need to read clearly against any camera background,
-// so they use a bolder fill/stroke than the pale in-progress draw preview
-const ZONE_SAVED_FILL   = 'rgba(220,38,38,0.28)';  // zone-red-600 @ 28% opacity
-const ZONE_SAVED_STROKE = '#DC2626';               // zone-red-600, solid
-const HANDLE_R        = 6;
-const CIRCLE_SEGS     = 48;
-const DEMO_W          = 1280;
-const DEMO_H          = 720;
+const SEVERITY_LABEL = { high: 'High', medium: 'Medium', low: 'Low' };
 
 // ── state ─────────────────────────────────────────────────────────────────────
-let feedMode = 'live';               // 'live' | 'demo'
-let phase    = 'idle';               // 'idle' | 'draw' | 'move' | 'name'
-let drawMode = 'rect';               // 'rect' | 'poly' | 'circle'
-let pendingPoly = null;              // normalised [[x,y]…]
-let savedZones  = {};                // name → [[x,y]…] normalised
-let rules       = [];                // synced from backend: {id, text, zone, enabled, zoneCleared}
+let currentView = 'dashboard';        // 'dashboard' | 'history'
+let feedMode    = 'live';             // 'live' | 'demo'
+let phase       = 'idle';             // 'idle' | 'draw' | 'move' | 'name'
+let drawMode    = 'rect';             // 'rect' | 'poly' | 'circle'
+let pendingPoly = null;               // normalised [[x,y]…] of the zone being drawn
+let pendingShapeType = null;
+let savedZones  = {};                 // name → [[x,y]…] normalised
+let rules       = [];                 // synced from backend
 let monitoringActive = false;
+let demoSourceReady  = false;         // backend has a demo video loaded to analyze
+let customDemoUrl    = null;          // uploaded clip overriding the animated scene
+let customDemoIsBlob = false;         // blob URLs must be revoked; server URLs must not
 
 // draw-phase state
-let rectStart    = null;
-let rectCur      = null;
-let polyPts      = [];
-let mousePos     = null;
-let circleCenter = null;
-let circleEdge   = null;
+let rectStart = null, rectCur = null;
+let polyPts = [], mousePos = null;
+let circleCenter = null, circleEdge = null;
 
 // move-phase state
-let moveActive = false;
-let moveLast   = null;
+let moveActive = false, moveLast = null;
+let resizeMode = null, resizeCornerIndex = -1, resizeAnchor = null, resizeCenterPx = null;
 
-// resize-phase state (rect corners / circle radius)
-let pendingShapeType = null;   // 'rect' | 'poly' | 'circle'
-let resizeMode       = null;   // null | 'rect-corner' | 'circle-edge'
-let resizeCornerIndex = -1;    // which of the 4 rect corners is being dragged
-let resizeAnchor      = null;  // rect: opposite corner, normalised {x,y}
-let resizeCenterPx    = null;  // circle: fixed centre in pixel space during resize
-
-// demo state
-let demoStreamStarted = false;
-let demoVideoLoaded   = false;  // true once a sample/upload video has been selected
-
-// ── canvas sizing ─────────────────────────────────────────────────────────────
-function syncCanvasSize() {
-  const r = canvas.getBoundingClientRect();
-  if (r.width === 0) return;
-  canvas.width  = r.width;
-  canvas.height = r.height;
-  redraw();
+// ── utilities ─────────────────────────────────────────────────────────────────
+function fetchJson(url, opts = {}) {
+  const init = { method: opts.method || 'GET', headers: {} };
+  if (opts.body !== undefined) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(opts.body);
+  }
+  return fetch(url, init).then(r => r.json());
 }
-new ResizeObserver(syncCanvasSize).observe(canvas);
 
-// ── camera overlay ────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s == null ? '' : String(s);
+  return div.innerHTML;
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+// matches the backend's naive local-time ISO timestamps
+function localIso(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function localIsoHoursAgo(hours) {
+  return localIso(new Date(Date.now() - hours * 3600 * 1000));
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) +
+         ' · ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function confidencePct(c) {
+  return `${Math.round((c || 0) * 100)}%`;
+}
+
+let toastTimer = null;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3400);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// VIEW SWITCHING — Dashboard / History
+// ═════════════════════════════════════════════════════════════════════════════
+
+function switchView(view) {
+  if (view === currentView) return;
+  currentView = view;
+  const isHistory = view === 'history';
+  dashboardViewEl.hidden = isHistory;
+  historyViewEl.hidden = !isHistory;
+  document.querySelectorAll('#mainNav .nav-link').forEach(link => {
+    link.classList.toggle('active', link.dataset.view === view);
+  });
+  if (isHistory) {
+    renderHistoryZoneChips();
+    loadHistory();
+  }
+  window.scrollTo({ top: 0 });
+}
+
+document.querySelectorAll('#mainNav .nav-link').forEach(link => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    switchView(link.dataset.view);
+  });
+});
+
+document.getElementById('backToDashboard').addEventListener('click', () => switchView('dashboard'));
+
+// ═════════════════════════════════════════════════════════════════════════════
+// DEMO SCENE — procedurally animated warehouse floor, drawn onto the hidden
+// 1280×720 #demoSceneCanvas and streamed into #demoVideo via captureStream(30).
+// ═════════════════════════════════════════════════════════════════════════════
+
+let demoRafId = null;
+let demoLastTs = null;
+let demoClock = 0;
+
+const demoWorkers = [
+  { x: 190,  y: 588, dir:  1, speed: 46, scale: 1.18, vest: '#F97316', helmet: true,  phase: 0.0, min: 110, max: 560 },
+  { x: 640,  y: 648, dir: -1, speed: 58, scale: 1.34, vest: '#FBBF24', helmet: true,  phase: 2.1, min: 240, max: 900 },
+  { x: 1010, y: 566, dir:  1, speed: 38, scale: 1.08, vest: '#F97316', helmet: false, phase: 4.2, min: 660, max: 1180 },
+];
+
+const demoBoxes = [
+  { base: 0,   w: 36, h: 26 },
+  { base: 190, w: 42, h: 30 },
+  { base: 400, w: 32, h: 24 },
+  { base: 560, w: 46, h: 30 },
+];
+
+function startDemoScene() {
+  if (demoRafId != null) return;
+  demoLastTs = null;
+  const loop = (ts) => {
+    const dt = demoLastTs == null ? 0 : Math.min((ts - demoLastTs) / 1000, 0.1);
+    demoLastTs = ts;
+    demoClock += dt;
+    updateDemoEntities(dt);
+    drawDemoScene();
+    demoRafId = requestAnimationFrame(loop);
+  };
+  demoRafId = requestAnimationFrame(loop);
+}
+
+function stopDemoScene() {
+  if (demoRafId != null) cancelAnimationFrame(demoRafId);
+  demoRafId = null;
+}
+
+function updateDemoEntities(dt) {
+  demoWorkers.forEach(w => {
+    w.x += w.dir * w.speed * dt;
+    w.phase += (w.speed / 26) * dt * 2.4;
+    if (w.x > w.max) { w.x = w.max; w.dir = -1; }
+    if (w.x < w.min) { w.x = w.min; w.dir = 1; }
+  });
+}
+
+function rr(c, x, y, w, h, r) {
+  c.beginPath();
+  c.roundRect(x, y, w, h, r);
+}
+
+function drawDemoScene() {
+  const c = sceneCtx;
+
+  // ── back wall + floor ──
+  c.fillStyle = '#EDEBE8';
+  c.fillRect(0, 0, DEMO_W, 420);
+  c.fillStyle = '#DAD7D4';
+  c.fillRect(0, 420, DEMO_W, DEMO_H - 420);
+  c.strokeStyle = '#C7C3BF';
+  c.lineWidth = 3;
+  c.beginPath(); c.moveTo(0, 420); c.lineTo(DEMO_W, 420); c.stroke();
+
+  // floor perspective lines
+  c.strokeStyle = 'rgba(176,172,168,0.5)';
+  c.lineWidth = 2;
+  for (let i = -4; i <= 4; i++) {
+    c.beginPath();
+    c.moveTo(640 + i * 60, 420);
+    c.lineTo(640 + i * 260, DEMO_H);
+    c.stroke();
+  }
+
+  // safety lane stripes on the floor
+  c.strokeStyle = 'rgba(234,179,8,0.55)';
+  c.lineWidth = 5;
+  c.setLineDash([26, 20]);
+  [560, 700].forEach(y => {
+    c.beginPath(); c.moveTo(40, y); c.lineTo(DEMO_W - 40, y); c.stroke();
+  });
+  c.setLineDash([]);
+
+  // ── ceiling lights ──
+  [230, 640, 1050].forEach(x => {
+    c.strokeStyle = '#B8B4B0'; c.lineWidth = 4;
+    c.beginPath(); c.moveTo(x, 0); c.lineTo(x, 34); c.stroke();
+    c.fillStyle = '#FFF7DB';
+    rr(c, x - 46, 34, 92, 14, 6); c.fill();
+    c.strokeStyle = '#D8D4D0'; c.lineWidth = 2;
+    rr(c, x - 46, 34, 92, 14, 6); c.stroke();
+  });
+
+  // ── windows ──
+  for (let i = 0; i < 4; i++) {
+    const x = 90 + i * 150;
+    c.fillStyle = '#DCE6EC';
+    rr(c, x, 70, 108, 78, 6); c.fill();
+    c.strokeStyle = '#FFFFFF'; c.lineWidth = 6;
+    rr(c, x, 70, 108, 78, 6); c.stroke();
+    c.strokeStyle = '#FFFFFF'; c.lineWidth = 4;
+    c.beginPath(); c.moveTo(x + 54, 72); c.lineTo(x + 54, 146); c.stroke();
+  }
+
+  // ── roller shutter door ──
+  c.fillStyle = '#D2CECA';
+  c.fillRect(956, 150, 274, 270);
+  c.strokeStyle = '#B5B1AD'; c.lineWidth = 3;
+  for (let y = 158; y < 418; y += 22) {
+    c.beginPath(); c.moveTo(960, y); c.lineTo(1226, y); c.stroke();
+  }
+  c.fillStyle = '#A8A4A0';
+  c.fillRect(948, 140, 10, 280);
+  c.fillRect(1230, 140, 10, 280);
+
+  // ── storage racks with boxes ──
+  drawDemoRack(c, 80, 250);
+  drawDemoRack(c, 380, 250);
+
+  // ── painted floor zone (ties into the zone feature) ──
+  c.fillStyle = 'rgba(225,29,72,0.16)';
+  c.beginPath();
+  c.moveTo(770, 486); c.lineTo(1080, 486); c.lineTo(1140, 660); c.lineTo(716, 660);
+  c.closePath(); c.fill();
+  c.strokeStyle = 'rgba(225,29,72,0.75)';
+  c.lineWidth = 3;
+  c.setLineDash([14, 10]);
+  c.stroke();
+  c.setLineDash([]);
+  c.fillStyle = 'rgba(190,18,60,0.85)';
+  c.font = '700 20px -apple-system, system-ui, sans-serif';
+  c.textAlign = 'center';
+  c.fillText('LOADING ZONE', 928, 585);
+
+  // ── conveyor belt with moving boxes ──
+  drawDemoConveyor(c);
+
+  // ── forklift ──
+  const fx = 640 + 350 * Math.sin(demoClock * 0.32);
+  const fdir = Math.cos(demoClock * 0.32) >= 0 ? 1 : -1;
+  drawDemoForklift(c, fx, 662, fdir);
+
+  // ── workers ──
+  demoWorkers.forEach(w => drawDemoWorker(c, w));
+}
+
+function drawDemoRack(c, x, w) {
+  const yTop = 168, yBot = 415;
+  // uprights
+  c.fillStyle = '#8A8580';
+  c.fillRect(x, yTop, 10, yBot - yTop);
+  c.fillRect(x + w - 10, yTop, 10, yBot - yTop);
+  // shelves
+  const shelfColors = ['#C89F6D', '#B98A55', '#D4AC76'];
+  [248, 332, 414].forEach((sy, i) => {
+    c.fillStyle = '#8A8580';
+    c.fillRect(x, sy, w, 8);
+    // boxes on the shelf
+    let bx = x + 16;
+    const widths = [64, 84, 56, 74];
+    widths.forEach((bw, j) => {
+      if (bx + bw > x + w - 14) return;
+      c.fillStyle = shelfColors[(i + j) % 3];
+      const bh = 44 + ((i + j) % 3) * 10;
+      rr(c, bx, sy - bh, bw, bh, 3); c.fill();
+      c.strokeStyle = 'rgba(112,82,45,0.4)'; c.lineWidth = 2;
+      rr(c, bx, sy - bh, bw, bh, 3); c.stroke();
+      bx += bw + 12;
+    });
+  });
+}
+
+function drawDemoConveyor(c) {
+  const x0 = 70, x1 = 880, y = 468, h = 58;
+  // legs
+  c.fillStyle = '#6B7280';
+  c.fillRect(x0 + 30, y + h, 10, 62);
+  c.fillRect(x1 - 40, y + h, 10, 62);
+  // frame
+  c.fillStyle = '#4B4B4B';
+  rr(c, x0, y, x1 - x0, h, 12); c.fill();
+  // belt surface
+  c.fillStyle = '#78716C';
+  rr(c, x0 + 8, y + 8, x1 - x0 - 16, h - 22, 8); c.fill();
+  // moving belt texture
+  c.strokeStyle = 'rgba(255,255,255,0.18)';
+  c.lineWidth = 3;
+  const beltLen = x1 - x0 - 16;
+  const off = (demoClock * 70) % 34;
+  for (let lx = x0 + 8 + off; lx < x1 - 8; lx += 34) {
+    c.beginPath(); c.moveTo(lx, y + 12); c.lineTo(lx, y + h - 18); c.stroke();
+  }
+  // rollers under the belt
+  c.fillStyle = '#A8A29E';
+  for (let rx = x0 + 18; rx < x1 - 10; rx += 46) {
+    c.beginPath(); c.arc(rx, y + h - 8, 5, 0, Math.PI * 2); c.fill();
+  }
+  // boxes riding the belt
+  demoBoxes.forEach(b => {
+    const bx = x0 + 10 + ((b.base + demoClock * 60) % (beltLen - b.w));
+    const by = y - b.h + 8;
+    c.fillStyle = '#C89F6D';
+    rr(c, bx, by, b.w, b.h, 3); c.fill();
+    c.strokeStyle = 'rgba(112,82,45,0.45)'; c.lineWidth = 2;
+    rr(c, bx, by, b.w, b.h, 3); c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,0.55)'; c.lineWidth = 3;
+    c.beginPath(); c.moveTo(bx + b.w / 2, by + 2); c.lineTo(bx + b.w / 2, by + b.h - 2); c.stroke();
+  });
+}
+
+function drawDemoWorker(c, w) {
+  const s = w.scale;
+  const bob = Math.sin(w.phase * 2) * 1.6;
+  c.save();
+  c.translate(w.x, w.y + bob);
+
+  // shadow
+  c.fillStyle = 'rgba(28,25,23,0.15)';
+  c.beginPath(); c.ellipse(0, 2, 17 * s, 4.5 * s, 0, 0, Math.PI * 2); c.fill();
+
+  // legs — walk swing
+  const swing = Math.sin(w.phase) * 9 * s;
+  c.strokeStyle = '#3F3A36';
+  c.lineWidth = 5.5 * s;
+  c.lineCap = 'round';
+  c.beginPath(); c.moveTo(0, -36 * s); c.lineTo( swing, -2 * s); c.stroke();
+  c.beginPath(); c.moveTo(0, -36 * s); c.lineTo(-swing, -2 * s); c.stroke();
+
+  // torso — hi-vis vest
+  c.fillStyle = w.vest;
+  rr(c, -10 * s, -66 * s, 20 * s, 32 * s, 7 * s); c.fill();
+  // reflective stripe
+  c.fillStyle = 'rgba(255,255,255,0.8)';
+  c.fillRect(-10 * s, -52 * s, 20 * s, 3.5 * s);
+
+  // arms
+  const armSwing = Math.sin(w.phase + Math.PI) * 6 * s;
+  c.strokeStyle = w.vest;
+  c.lineWidth = 4.5 * s;
+  c.beginPath(); c.moveTo(-8 * s, -60 * s); c.lineTo(-13 * s - armSwing * 0.4, -42 * s); c.stroke();
+  c.beginPath(); c.moveTo( 8 * s, -60 * s); c.lineTo( 13 * s + armSwing * 0.4, -42 * s); c.stroke();
+
+  // head
+  c.fillStyle = '#D9BFA5';
+  c.beginPath(); c.arc(0, -74 * s, 8 * s, 0, Math.PI * 2); c.fill();
+
+  // hard hat (one worker "forgot" theirs — a nod to the PPE rules)
+  if (w.helmet) {
+    c.fillStyle = '#FBBF24';
+    c.beginPath(); c.arc(0, -75 * s, 8.5 * s, Math.PI, 0); c.fill();
+    c.fillRect(-8.5 * s, -75 * s, 17 * s, 3 * s);
+  } else {
+    c.fillStyle = '#4B4B4B';
+    c.beginPath(); c.arc(0, -78 * s, 8 * s, Math.PI, 0); c.fill();
+  }
+
+  c.restore();
+}
+
+function drawDemoForklift(c, x, y, dir) {
+  c.save();
+  c.translate(x, y);
+  if (dir < 0) c.scale(-1, 1);
+
+  // shadow
+  c.fillStyle = 'rgba(28,25,23,0.16)';
+  c.beginPath(); c.ellipse(0, 0, 74, 9, 0, 0, Math.PI * 2); c.fill();
+
+  // wheels
+  c.fillStyle = '#26221F';
+  c.beginPath(); c.arc(-36, -12, 13, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc( 30, -12, 15, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#6B7280';
+  c.beginPath(); c.arc(-36, -12, 5, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc( 30, -12, 6, 0, Math.PI * 2); c.fill();
+
+  // body
+  c.fillStyle = '#EA580C';
+  rr(c, -54, -62, 90, 44, 9); c.fill();
+  // cabin window
+  c.fillStyle = '#BAE6FD';
+  rr(c, -22, -58, 36, 22, 4); c.fill();
+  c.strokeStyle = '#9CA3AF'; c.lineWidth = 2;
+  rr(c, -22, -58, 36, 22, 4); c.stroke();
+
+  // overhead guard
+  c.strokeStyle = '#4B4B4B';
+  c.lineWidth = 6;
+  c.beginPath(); c.moveTo(-40, -62); c.lineTo(-34, -104); c.lineTo(18, -104); c.lineTo(24, -62); c.stroke();
+  c.beginPath(); c.moveTo(-34, -104); c.lineTo(50, -104); c.stroke();
+
+  // mast
+  c.fillStyle = '#9CA3AF';
+  c.fillRect(46, -92, 9, 92);
+  c.fillStyle = '#6B7280';
+  c.fillRect(46, -20, 36, 6);  // fork blade
+  c.fillRect(46, -30, 6, 12);
+
+  // pallet + load
+  const lift = Math.sin(demoClock * 0.7) * 6;
+  c.fillStyle = '#B98A55';
+  c.fillRect(50, -40 - lift, 40, 7);
+  c.fillStyle = '#C89F6D';
+  rr(c, 53, -72 - lift, 34, 32, 3); c.fill();
+  c.strokeStyle = 'rgba(112,82,45,0.45)'; c.lineWidth = 2;
+  rr(c, 53, -72 - lift, 34, 32, 3); c.stroke();
+
+  c.restore();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FEED MODE — Live (MJPEG <img>) / Demo (sample.mp4 by default, or an
+// uploaded clip once one is loaded; animated canvas scene as a fallback)
+// ═════════════════════════════════════════════════════════════════════════════
+
+function attachSceneStream() {
+  demoVideo.removeAttribute('src');
+  try {
+    demoVideo.srcObject = sceneCanvas.captureStream(30);
+  } catch (e) {
+    console.warn('Demo stream unavailable:', e);
+  }
+}
+
+// Points #demoVideo at whatever the demo feed should show: the uploaded clip
+// when one is active, otherwise the animated canvas scene.
+function attachDemoMedia() {
+  if (customDemoUrl) {
+    demoVideo.srcObject = null;
+    if (demoVideo.getAttribute('src') !== customDemoUrl) demoVideo.src = customDemoUrl;
+    demoVideo.loop = true;
+    stopDemoScene();
+  } else {
+    attachSceneStream();
+    startDemoScene();
+  }
+  demoVideo.play().catch(() => {});
+}
+
+function updateFeedTag() {
+  const isDemo = feedMode === 'demo';
+  feedTagEl.classList.toggle('demo', isDemo);
+  feedTagTextEl.textContent = isDemo ? 'DEMO' : 'LIVE';
+}
+
+function setFeedMode(mode, opts = {}) {
+  if (mode === feedMode) return;
+  if (phase !== 'idle') cancelDraw();
+  feedMode = mode;
+
+  document.querySelectorAll('#feedModeToggle .mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+
+  const isDemo = mode === 'demo';
+
+  if (isDemo) {
+    // ── live → demo ───────────────────────────────────────────────────
+    feedImg.hidden = true;                 // live feed hidden (no transition needed)
+    // keep demo visible via display override so the fade-in can render
+    demoVideo.style.display = 'block !important';
+    demoVideo.hidden = false;
+    demoVideo.style.opacity = '0';
+    attachDemoMedia();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      demoVideo.style.opacity = '';
+      // fade done — switch to the normal hidden-attribute mechanism
+      demoVideo.style.display = '';
+    }));
+    hideCameraOverlay();
+    updateFeedTag();
+    updateUploadControls();
+    if (!opts.silent) setBackendDemoMode(true);
+  } else {
+    // ── demo → live ───────────────────────────────────────────────────
+    // keep demo visible via display override so the fade-out can render
+    demoVideo.style.display = 'block !important';
+    demoVideo.style.opacity = '0';
+    stopDemoScene();
+    setTimeout(() => {
+      demoVideo.pause();
+      demoVideo.removeAttribute('src');
+      demoVideo.srcObject = null;
+      demoVideo.style.display = '';
+      demoVideo.style.opacity = '';
+      demoVideo.hidden = true;
+    }, 320);
+    // restore the MJPEG source and fade the live image in
+    if (feedImg.dataset.liveSrc) {
+      feedImg.src = feedImg.dataset.liveSrc;
+      delete feedImg.dataset.liveSrc;
+    }
+    feedImg.hidden = false;
+    feedImg.style.opacity = '0';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      feedImg.style.opacity = '';
+    }));
+    hideCameraOverlay();
+    updateFeedTag();
+    updateUploadControls();
+    if (feedImg.complete && feedImg.naturalWidth === 0) showCameraOverlay();
+    if (!opts.silent) setBackendDemoMode(false);
+  }
+
+  updateStartDisabled();
+}
+
+document.querySelectorAll('#feedModeToggle .mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => setFeedMode(btn.dataset.mode));
+});
+
+// The backend switches its analysis frame source with demo mode. While the UI
+// plays the procedural scene, the detector reads the loaded sample video —
+// load it silently so Start monitoring has frames to analyze.
+function setBackendDemoMode(demo) {
+  fetchJson('/demo_mode', { method: 'POST', body: { demo_mode: demo } })
+    .then(() => {
+      if (demo) ensureDemoSource();
+    })
+    .catch(() => {
+      if (demo) toast('Could not reach the server — demo analysis may be unavailable');
+    });
+}
+
+function ensureDemoSource() {
+  fetchJson('/demo_mode')
+    .then(d => {
+      if (d.video_path) {
+        demoSourceReady = true;
+        // a previously uploaded clip (e.g. still set after a reload) overrides
+        // the animated scene — display it instead
+        const path = String(d.video_path).replace(/\\/g, '/');
+        if (path.startsWith('uploads/') && feedMode === 'demo' && !customDemoIsBlob) {
+          applyCustomDemoVideo('/' + path, false);
+        }
+        return;
+      }
+      return fetchJson('/demo_run/load_sample', { method: 'POST' }).then(sd => {
+        demoSourceReady = !!sd.ok;
+      });
+    })
+    .catch(() => { demoSourceReady = false; });
+}
+
+// ── demo clip upload — swap the animated scene for the user's own video ─────
+uploadVideoBtn.addEventListener('click', () => videoFileInput.click());
+
+videoFileInput.addEventListener('change', () => {
+  const file = videoFileInput.files && videoFileInput.files[0];
+  videoFileInput.value = '';              // allow re-picking the same file
+  if (!file) return;
+  if (monitoringActive) { toast('Stop monitoring before switching videos'); return; }
+  if (!/\.(mp4|mov|avi)$/i.test(file.name)) {
+    toast('Unsupported file type — use mp4, mov or avi');
+    return;
+  }
+
+  uploadVideoBtn.classList.add('loading');
+  const body = new FormData();
+  body.append('video', file);
+
+  fetch('/upload_video', { method: 'POST', body })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) throw new Error(d.error || 'Upload failed');
+      demoSourceReady = true;
+      applyCustomDemoVideo(URL.createObjectURL(file), true);
+      toast('Video loaded — start monitoring to analyze your clip');
+    })
+    .catch(err => toast(err.message || 'Upload failed'))
+    .finally(() => uploadVideoBtn.classList.remove('loading'));
+});
+
+sampleSceneBtn.addEventListener('click', () => {
+  if (monitoringActive) { toast('Stop monitoring before switching videos'); return; }
+  restoreAnimatedScene();
+});
+
+useSampleBtn.addEventListener('click', () => {
+  if (monitoringActive) { toast('Stop monitoring before switching videos'); return; }
+  loadSampleVideo();
+});
+
+function applyCustomDemoVideo(url, isBlob) {
+  if (customDemoIsBlob && customDemoUrl) URL.revokeObjectURL(customDemoUrl);
+  customDemoUrl = url;
+  customDemoIsBlob = !!isBlob;
+  stopDemoScene();
+  demoVideo.srcObject = null;
+  demoVideo.src = url;
+  demoVideo.loop = true;
+  if (feedMode === 'demo') demoVideo.play().catch(() => {});
+  updateUploadControls();
+}
+
+// Load the bundled manufacturing video (demo/sample.mp4) as the demo source.
+function loadSampleVideo() {
+  stopDemoScene();
+  demoVideo.srcObject = null;
+  demoVideo.src = 'demo/sample.mp4';
+  demoVideo.loop = true;
+  customDemoUrl = 'demo/sample.mp4';
+  customDemoIsBlob = false;
+  demoVideo.play().catch(() => {});
+  // point the backend's analysis source at the bundled sample clip
+  fetchJson('/demo_run/load_sample', { method: 'POST' })
+    .then(() => { demoSourceReady = true; })
+    .catch(() => { demoSourceReady = false; });
+  updateUploadControls();
+}
+
+// Return to the animated canvas scene (the default demo source).
+function restoreAnimatedScene() {
+  if (customDemoIsBlob && customDemoUrl) URL.revokeObjectURL(customDemoUrl);
+  customDemoUrl = null;
+  customDemoIsBlob = false;
+  attachSceneStream();
+  startDemoScene();
+  demoVideo.play().catch(() => {});
+  // point the backend's analysis source back at the bundled sample clip
+  fetchJson('/demo_run/load_sample', { method: 'POST' })
+    .then(() => { demoSourceReady = true; })
+    .catch(() => { demoSourceReady = false; });
+  updateUploadControls();
+}
+
+// Upload controls live in the demo feed only, and lock while monitoring.
+function updateUploadControls() {
+  const demo = feedMode === 'demo';
+  uploadVideoBtn.hidden = !demo;
+  uploadVideoBtn.disabled = monitoringActive;
+  uploadVideoBtn.title = monitoringActive
+    ? 'Stop monitoring before switching videos'
+    : 'Use your own video clip as the demo feed';
+  useSampleBtn.hidden = !(demo && !customDemoUrl);
+  useSampleBtn.disabled = monitoringActive;
+  sampleSceneBtn.hidden = !(demo && customDemoUrl);
+  sampleSceneBtn.disabled = monitoringActive;
+}
+
+// ── camera overlay (live feed failure) ────────────────────────────────────────
 function showCameraOverlay() {
-  if (feedMode === 'live') document.getElementById('cameraOverlay').classList.add('visible');
+  if (feedMode === 'live') cameraOverlayEl.classList.add('visible');
 }
 function hideCameraOverlay() {
-  document.getElementById('cameraOverlay').classList.remove('visible');
+  cameraOverlayEl.classList.remove('visible');
 }
+
 feedImg.addEventListener('error', () => {
   // ignore the synthetic error fired while the src is blanked for freeze-frame
-  if (!feedImg.dataset.liveSrc) showCameraOverlay();
+  if (!feedImg.dataset.liveSrc && feedMode === 'live') showCameraOverlay();
 });
 feedImg.addEventListener('load', hideCameraOverlay);
-// the error may fire before this script attaches (src is set in the HTML)
-if (feedImg.complete && feedImg.naturalWidth === 0 && !feedImg.dataset.liveSrc) {
-  showCameraOverlay();
-}
-// a failed camera keeps the stream open with zero bytes — the img never errors,
-// so poll until the first real frame arrives
+
+// a failed camera keeps the MJPEG stream open with zero bytes — the img never
+// fires an error event, so poll until the first real frame arrives
 setTimeout(() => {
   const t = setInterval(() => {
     if (feedMode !== 'live' || feedImg.dataset.liveSrc) return;
     if (feedImg.naturalWidth > 0) { hideCameraOverlay(); clearInterval(t); return; }
     showCameraOverlay();
   }, 2000);
-}, 6000);
+}, 5000);
 
 // ── feed freeze / resume (works for live img and demo video) ─────────────────
-function activeMediaEl() {
-  return feedMode === 'demo' ? demoVideo : feedImg;
-}
-
-// Freezing shows a static snapshot behind the (transparent) drawing canvas —
-// it must live in its own layer, not be drawn onto #zoneCanvas itself, since
-// redraw() clears that canvas on every mousemove while drawing/moving a zone.
+// The snapshot must live in its own layer — redraw() clears #zoneCanvas on
+// every mousemove while a zone is being drawn or moved.
 function freezeFeed() {
   const r = canvas.getBoundingClientRect();
-  canvas.width  = r.width;
+  canvas.width = r.width;
   canvas.height = r.height;
 
-  if (feedMode === 'demo') {
-    // the demoVideo element only shows real content once frames start
-    // streaming through captureStream() during an active run — before/between
-    // runs it's just a placeholder, so client-side canvas capture would freeze
-    // on the wrong image. Always fetch a real frame straight from the loaded
-    // demo video instead.
-    demoVideo.pause();
-    frozenFrameEl.src = `/demo_run/current_frame?ts=${Date.now()}`;
-    frozenFrameEl.hidden = false;
-    frameEl.classList.add('freeze');
-    return;
-  }
+  const media = feedMode === 'demo' ? demoVideo : feedImg;
+  if (feedMode === 'demo') stopDemoScene();
 
-  const media = activeMediaEl();
   let captured = false;
   try {
     const tmp = document.createElement('canvas');
-    tmp.width  = canvas.width;
+    tmp.width = canvas.width;
     tmp.height = canvas.height;
     tmp.getContext('2d').drawImage(media, 0, 0, tmp.width, tmp.height);
     frozenFrameEl.src = tmp.toDataURL('image/jpeg', 0.9);
@@ -143,14 +796,18 @@ function freezeFeed() {
   }
 
   if (!captured) {
-    // couldn't capture from the live media element — fall back to the
-    // backend's last-known frame instead of showing a black screen
+    // couldn't capture from the media element — fall back to the backend's
+    // last-known frame instead of showing a black screen
     frozenFrameEl.src = `/current_frame?ts=${Date.now()}`;
   }
   frozenFrameEl.hidden = false;
 
-  feedImg.dataset.liveSrc = feedImg.src;
-  feedImg.src = '';
+  if (feedMode === 'live') {
+    feedImg.dataset.liveSrc = feedImg.src;
+    feedImg.src = '';
+  } else {
+    demoVideo.pause();
+  }
   frameEl.classList.add('freeze');
 }
 
@@ -159,7 +816,12 @@ function resumeFeed() {
   frozenFrameEl.hidden = true;
   frozenFrameEl.src = '';
   if (feedMode === 'demo') {
-    demoVideo.play().catch(() => {});
+    if (customDemoUrl) {
+      demoVideo.play().catch(() => {});
+    } else {
+      startDemoScene();
+      demoVideo.play().catch(() => {});
+    }
   } else if (feedImg.dataset.liveSrc) {
     feedImg.src = feedImg.dataset.liveSrc;
     delete feedImg.dataset.liveSrc;
@@ -167,250 +829,19 @@ function resumeFeed() {
   syncCanvasSize();
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// DEMO MODE — real backend analysis (/demo_run/*), rendered into #demoVideo via
-// the existing sceneCanvas → captureStream pipeline (each analysed frame is
-// drawn onto the canvas instead of a procedural animation).
-// ═════════════════════════════════════════════════════════════════════════════
-
-let demoActive       = false;
-let demoPollInterval = null;
-const demoFrameImg   = new Image();
-demoFrameImg.onload  = () => sceneCtx.drawImage(demoFrameImg, 0, 0, DEMO_W, DEMO_H);
-
-function setFeedMode(mode) {
-  if (mode === feedMode) return;
-  if (phase !== 'idle') cancelDraw();
-  feedMode = mode;
-  document.querySelectorAll('#feedModeToggle .mode-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.mode === mode);
-  });
-  const isDemo = mode === 'demo';
-  feedImg.hidden   = isDemo;
-  demoVideo.hidden = !isDemo;
-  document.getElementById('demoStrip').hidden = !isDemo;
-  hideCameraOverlay();
-  if (isDemo) {
-    ensureDemoStream();
-    demoVideo.play().catch(() => {});
-    renderDemoSources();
-    if (!demoActive) drawDemoPlaceholder();
-  } else {
-    demoVideo.pause();
-    if (feedImg.dataset.liveSrc) {
-      feedImg.src = feedImg.dataset.liveSrc;
-      delete feedImg.dataset.liveSrc;
-    }
-    if (feedImg.complete && feedImg.naturalWidth === 0 && !feedImg.dataset.liveSrc) {
-      showCameraOverlay();
-    }
-  }
-  if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
-  if (typeof updateStartDisabled === 'function') updateStartDisabled();
-  if (typeof renderAlertsList === 'function') renderAlertsList();
+// ── canvas sizing ─────────────────────────────────────────────────────────────
+function syncCanvasSize() {
+  const r = canvas.getBoundingClientRect();
+  if (r.width === 0) return;
+  canvas.width = r.width;
+  canvas.height = r.height;
+  redraw();
 }
-
-document.querySelectorAll('#feedModeToggle .mode-btn').forEach(btn => {
-  btn.addEventListener('click', () => setFeedMode(btn.dataset.mode));
-});
-
-function ensureDemoStream() {
-  if (demoStreamStarted) return;
-  try {
-    demoVideo.srcObject = sceneCanvas.captureStream(30);
-    demoStreamStarted = true;
-  } catch (e) {
-    console.warn('Demo stream unavailable:', e);
-  }
-}
-
-function drawDemoPlaceholder() {
-  sceneCtx.fillStyle = '#1C1917';
-  sceneCtx.fillRect(0, 0, DEMO_W, DEMO_H);
-  sceneCtx.fillStyle = '#A8A29E';
-  sceneCtx.font = '600 24px -apple-system,system-ui,sans-serif';
-  sceneCtx.textAlign = 'center';
-  sceneCtx.textBaseline = 'middle';
-  sceneCtx.fillText('Select a video source below to begin analysis', DEMO_W / 2, DEMO_H / 2);
-}
-
-function setDemoStatus(msg, isSummary) {
-  const el = document.getElementById('demoStatusText');
-  if (!el) return;
-  el.textContent = msg || '';
-  el.classList.toggle('summary', !!isSummary);
-}
-
-function renderDemoSources() {
-  const wrap = document.getElementById('demoSources');
-  wrap.innerHTML = '';
-
-  const sampleBtn = document.createElement('button');
-  sampleBtn.type = 'button';
-  sampleBtn.className = 'demo-src';
-  sampleBtn.textContent = 'Use sample video';
-  sampleBtn.disabled = demoActive;
-  sampleBtn.addEventListener('click', useSampleVideo);
-  wrap.appendChild(sampleBtn);
-
-  const uploadBtn = document.createElement('button');
-  uploadBtn.type = 'button';
-  uploadBtn.className = 'demo-src';
-  uploadBtn.textContent = 'Upload video';
-  uploadBtn.disabled = demoActive;
-  uploadBtn.addEventListener('click', () => document.getElementById('demoVideoInput').click());
-  wrap.appendChild(uploadBtn);
-
-  if (!demoActive && demoRunCompleted) {
-    const reportBtn = document.createElement('button');
-    reportBtn.type = 'button';
-    reportBtn.className = 'demo-src demo-src-rose';
-    reportBtn.textContent = 'Generate analysis report';
-    reportBtn.addEventListener('click', () => {
-      digestBodyEl.hidden = false;
-      digestChevronEl.textContent = '▴';
-      digestCardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      generateDigest();
-    });
-    wrap.appendChild(reportBtn);
-  }
-}
-
-function onDemoVideoLoaded() {
-  demoVideoLoaded = true;
-  demoRunCompleted = false;
-  renderDemoSources();
-  if (typeof updateStartDisabled === 'function') updateStartDisabled();
-  loadDemoPreviewFrame();
-  setDemoStatus('Video loaded — add zones if needed, then click Start monitoring');
-}
-
-// draws a real frame from the loaded video onto the scene canvas so the
-// visible preview (and anything captured off it, e.g. freezeFeed) shows
-// actual content instead of the placeholder — before any run has started
-function loadDemoPreviewFrame() {
-  const img = new Image();
-  img.onload = () => sceneCtx.drawImage(img, 0, 0, DEMO_W, DEMO_H);
-  img.src = `/demo_run/current_frame?ts=${Date.now()}`;
-}
-
-function useSampleVideo() {
-  setDemoStatus('Loading sample video…');
-  fetch('/demo_run/load_sample', { method: 'POST' })
-    .then(r => r.json())
-    .then(d => {
-      if (!d.ok) { setDemoStatus(d.error || 'Failed to load sample video'); return; }
-      onDemoVideoLoaded();
-    })
-    .catch(() => setDemoStatus('Failed to load sample video'));
-}
-
-document.getElementById('demoVideoInput').addEventListener('change', () => {
-  const input = document.getElementById('demoVideoInput');
-  const file = input.files[0];
-  if (!file) return;
-  const form = new FormData();
-  form.append('video', file);
-  setDemoStatus('Uploading…');
-  fetch('/upload_video', { method: 'POST', body: form })
-    .then(r => r.json())
-    .then(d => {
-      input.value = '';
-      if (!d.ok) { setDemoStatus(d.error || 'Upload failed'); return; }
-      onDemoVideoLoaded();
-    })
-    .catch(() => setDemoStatus('Upload failed'));
-});
-
-// matches Python's datetime.now().isoformat(timespec="seconds") — naive local
-// time, no trailing 'Z'/offset — since incident records are stored the same
-// way and compared as naive datetimes server-side (Date().toISOString() is
-// UTC and timezone-aware, which crashed that comparison).
-function localIsoNow() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T` +
-         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-// only called from the main Start monitoring button while in demo mode
-function startDemoRun() {
-  if (!demoVideoLoaded || rules.filter(r => r.enabled).length === 0) return;
-  fetch('/demo_run/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  })
-    .then(r => r.json())
-    .then(d => {
-      if (!d.ok) { setDemoStatus(d.error || 'Failed to start analysis'); return; }
-      demoActive = true;
-      demoRunCompleted = false;
-      demoRunStartedAt = localIsoNow();
-      setMonitoringUI(true, 'Analysing');
-      if (typeof updateDigestModeUI === 'function') updateDigestModeUI();
-      renderDemoSources();
-      document.getElementById('demoProgress').style.width = '0%';
-      setDemoStatus('Starting…');
-      if (demoPollInterval) clearInterval(demoPollInterval);
-      demoPollInterval = setInterval(pollDemoRun, 700);
-      pollDemoRun();
-    })
-    .catch(() => setDemoStatus('Failed to start analysis'));
-}
-
-function pollDemoRun() {
-  fetch('/demo_run/status').then(r => r.json()).then(d => {
-    if (!d.active) return;
-    const pct = d.total ? (d.current_index / d.total) * 100 : 0;
-    document.getElementById('demoProgress').style.width = pct.toFixed(1) + '%';
-    const ruleSuffix = d.current_rule_label ? ` — Rule: ${d.current_rule_label}` : '';
-    setDemoStatus(`Analysing frame ${d.current_index} of ${d.total}${ruleSuffix}`);
-    demoFrameImg.src = `/demo_run/frame?ts=${Date.now()}`;
-    updateDemoAlerts(d.alerts || []);
-
-    if (d.done) {
-      clearInterval(demoPollInterval);
-      demoPollInterval = null;
-      demoActive = false;
-      demoRunCompleted = true;
-      setMonitoringUI(false);
-      renderDemoSources();
-      if (typeof loadDigestStats === 'function') loadDigestStats();
-      const alertCount = (d.alerts || []).length;
-      const ruleCount = d.rule_count || 0;
-      setDemoStatus(
-        `Analysed ${d.total} frame${d.total === 1 ? '' : 's'} — ` +
-        `${alertCount} alert${alertCount === 1 ? '' : 's'} triggered across ` +
-        `${ruleCount} rule${ruleCount === 1 ? '' : 's'}.`,
-        true
-      );
-    }
-  }).catch(() => {});
-}
-
-function cancelDemoRun() {
-  fetch('/demo_run/cancel', { method: 'POST' }).then(() => {
-    if (demoPollInterval) { clearInterval(demoPollInterval); demoPollInterval = null; }
-    demoActive = false;
-    setMonitoringUI(false);
-    renderDemoSources();
-    setDemoStatus('Cancelled.');
-  });
-}
+new ResizeObserver(syncCanvasSize).observe(canvas);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ZONE DRAWING
 // ═════════════════════════════════════════════════════════════════════════════
-
-function toggleDrawMode() {
-  if (phase !== 'idle') { cancelDraw(); return; }
-  if (feedMode === 'demo' && !demoVideoLoaded) {
-    setDemoStatus('Select a video below before drawing a zone.');
-    return;
-  }
-  enterDraw();
-}
 
 const DRAW_HINTS = {
   rect:   'Click and drag to draw a rectangle zone',
@@ -418,15 +849,18 @@ const DRAW_HINTS = {
   circle: 'Click the centre, drag to set radius',
 };
 
+function toggleDrawMode() {
+  if (phase !== 'idle') { cancelDraw(); return; }
+  enterDraw();
+}
+
 function enterDraw() {
   phase = 'draw';
   rectStart = rectCur = null;
-  polyPts   = [];
-  mousePos  = null;
-  pendingPoly = null;
+  polyPts = []; mousePos = null;
+  pendingPoly = null; pendingShapeType = null;
   circleCenter = circleEdge = null;
   moveActive = false; moveLast = null;
-  pendingShapeType = null;
   resizeMode = null; resizeCornerIndex = -1; resizeAnchor = null; resizeCenterPx = null;
   promptEl.classList.remove('visible');
   document.getElementById('drawToolbar').hidden = false;
@@ -446,24 +880,27 @@ function enterDraw() {
 function enterMove() {
   phase = 'move';
   moveActive = false;
-  moveLast   = null;
+  moveLast = null;
   canvas.classList.remove('drawing');
   canvas.classList.add('moving');
+  setHint(moveHintText());
+  redraw();
+}
+
+function moveHintText() {
   const resizeHint = pendingShapeType === 'rect' ? ' · drag a corner to resize'
                     : pendingShapeType === 'circle' ? ' · drag the edge handle to resize'
                     : '';
-  setHint(`Drag to reposition${resizeHint}, then name it below ↓`);
-  redraw();
+  return `Drag to reposition${resizeHint}, then name it below`;
 }
 
 function cancelDraw() {
   phase = 'idle';
   rectStart = rectCur = null;
   polyPts = []; mousePos = null;
-  pendingPoly = null;
+  pendingPoly = null; pendingShapeType = null;
   circleCenter = circleEdge = null;
   moveActive = false; moveLast = null;
-  pendingShapeType = null;
   resizeMode = null; resizeCornerIndex = -1; resizeAnchor = null; resizeCenterPx = null;
 
   drawBtn.classList.remove('btn-draw-active');
@@ -492,6 +929,8 @@ document.querySelectorAll('input[name="drawMode"]').forEach(radio => {
   });
 });
 
+document.getElementById('cancelDrawBtn').addEventListener('click', cancelDraw);
+
 // ── canvas mouse handlers ─────────────────────────────────────────────────────
 canvas.addEventListener('mousedown', (e) => {
   if (phase === 'idle') return;
@@ -519,7 +958,7 @@ canvas.addEventListener('mousedown', (e) => {
       canvas.classList.add('grabbing');
     } else if (pointInPendingPoly(p)) {
       moveActive = true;
-      moveLast   = p;
+      moveLast = p;
       canvas.classList.add('grabbing');
     }
   }
@@ -587,7 +1026,7 @@ canvas.addEventListener('mouseup', (e) => {
       circleEdge = p;
       const dx = circleEdge.x - circleCenter.x;
       const dy = circleEdge.y - circleCenter.y;
-      if (Math.sqrt(dx*dx + dy*dy) < 8) { circleCenter = circleEdge = null; redraw(); return; }
+      if (Math.sqrt(dx * dx + dy * dy) < 8) { circleCenter = circleEdge = null; redraw(); return; }
       finishCircle();
     }
   }
@@ -609,7 +1048,7 @@ canvas.addEventListener('click', (e) => {
   if (polyPts.length >= 3) {
     const dx = polyPts[0].x - p.x;
     const dy = polyPts[0].y - p.y;
-    if (Math.sqrt(dx*dx + dy*dy) <= HANDLE_R * 2.5) { finishPoly(); return; }
+    if (Math.sqrt(dx * dx + dy * dy) <= HANDLE_R * 2.5) { finishPoly(); return; }
   }
   polyPts.push(p);
   redraw();
@@ -664,7 +1103,7 @@ function pointInPendingPoly(p) {
   return inside;
 }
 
-// ── finish drawing → enter move phase ─────────────────────────────────────────
+// ── finish drawing → move phase → naming ──────────────────────────────────────
 function finishRect() {
   const x1 = Math.min(rectStart.x, rectCur.x) / canvas.width;
   const y1 = Math.min(rectStart.y, rectCur.y) / canvas.height;
@@ -699,13 +1138,9 @@ function finishCircle() {
   showNamePrompt();
 }
 
-// ── name prompt ───────────────────────────────────────────────────────────────
 function showNamePrompt() {
   phase = 'name';
-  const resizeHint = pendingShapeType === 'rect' ? ' · drag a corner to resize'
-                    : pendingShapeType === 'circle' ? ' · drag the edge handle to resize'
-                    : '';
-  setHint(`Drag to reposition${resizeHint} · then name and save ↓`);
+  setHint(moveHintText() + ' · save below');
   promptEl.classList.add('visible');
   nameInput.value = '';
   nameInput.focus();
@@ -719,28 +1154,27 @@ function hidePendingPrompt() {
 function confirmZoneName() {
   const name = nameInput.value.trim();
   if (!name || !pendingPoly) return;
-  fetch('/zones', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, points: pendingPoly }),
-  })
-    .then(r => r.json())
+  if (savedZones[name]) { toast('A zone with that name already exists'); nameInput.focus(); return; }
+  fetchJson('/zones', { method: 'POST', body: { name, points: pendingPoly } })
     .then(d => {
-      if (d.ok) {
-        savedZones[name] = pendingPoly;
-        pendingPoly = null;
-        promptEl.classList.remove('visible');
-        renderZoneList();
-        syncZoneSelect();
-        cancelDraw();
-      }
-    });
+      if (!d.ok) { toast(d.error || 'Failed to save zone'); return; }
+      savedZones[name] = pendingPoly;
+      pendingPoly = null;
+      promptEl.classList.remove('visible');
+      renderZoneList();
+      syncZoneSelect();
+      renderHistoryZoneChips();
+      cancelDraw();
+    })
+    .catch(() => toast('Failed to save zone'));
 }
 
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter')  confirmZoneName();
   if (e.key === 'Escape') hidePendingPrompt();
 });
+document.getElementById('saveZoneBtn').addEventListener('click', confirmZoneName);
+document.getElementById('cancelZoneBtn').addEventListener('click', hidePendingPrompt);
 
 // ── redraw ────────────────────────────────────────────────────────────────────
 function redraw() {
@@ -762,8 +1196,8 @@ function redraw() {
       const y = Math.min(rectStart.y, rectCur.y);
       const w = Math.abs(rectCur.x - rectStart.x);
       const h = Math.abs(rectCur.y - rectStart.y);
-      ctx.fillStyle = ROSE_FILL; ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = ROSE_STROKE; ctx.lineWidth = 2;
+      ctx.fillStyle = ZONE_FILL; ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = ZONE_STROKE; ctx.lineWidth = 2;
       ctx.setLineDash([6, 3]); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
     }
 
@@ -772,16 +1206,16 @@ function redraw() {
       ctx.moveTo(polyPts[0].x, polyPts[0].y);
       polyPts.forEach(p => ctx.lineTo(p.x, p.y));
       if (mousePos) ctx.lineTo(mousePos.x, mousePos.y);
-      ctx.strokeStyle = ROSE_STROKE; ctx.lineWidth = 2;
+      ctx.strokeStyle = ZONE_STROKE; ctx.lineWidth = 2;
       ctx.setLineDash([6, 3]); ctx.stroke(); ctx.setLineDash([]);
       polyPts.forEach((p, i) => {
         ctx.beginPath(); ctx.arc(p.x, p.y, HANDLE_R, 0, Math.PI * 2);
-        ctx.fillStyle = i === 0 ? ROSE_STROKE : '#fff';
-        ctx.strokeStyle = ROSE_STROKE; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+        ctx.fillStyle = i === 0 ? ZONE_STROKE : '#fff';
+        ctx.strokeStyle = ZONE_STROKE; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
       });
       if (polyPts.length >= 3) {
         ctx.beginPath(); ctx.arc(polyPts[0].x, polyPts[0].y, HANDLE_R + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(220,38,38,0.4)'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = 'rgba(225,29,72,0.4)'; ctx.lineWidth = 2; ctx.stroke();
       }
     }
 
@@ -790,21 +1224,21 @@ function redraw() {
       const dx = edge.x - circleCenter.x, dy = edge.y - circleCenter.y;
       const r = Math.sqrt(dx * dx + dy * dy);
       ctx.beginPath(); ctx.arc(circleCenter.x, circleCenter.y, Math.max(r, 1), 0, Math.PI * 2);
-      ctx.fillStyle = ROSE_FILL; ctx.fill();
-      ctx.strokeStyle = ROSE_STROKE; ctx.lineWidth = 2;
+      ctx.fillStyle = ZONE_FILL; ctx.fill();
+      ctx.strokeStyle = ZONE_STROKE; ctx.lineWidth = 2;
       ctx.setLineDash([6, 3]); ctx.stroke(); ctx.setLineDash([]);
       if (r > 8) {
         ctx.beginPath(); ctx.moveTo(circleCenter.x, circleCenter.y); ctx.lineTo(edge.x, edge.y);
-        ctx.strokeStyle = 'rgba(220,38,38,0.5)'; ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(225,29,72,0.5)'; ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
       }
       ctx.beginPath(); ctx.arc(circleCenter.x, circleCenter.y, HANDLE_R, 0, Math.PI * 2);
-      ctx.fillStyle = ROSE_STROKE; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = ZONE_STROKE; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
     }
   }
 
   if ((phase === 'move' || phase === 'name') && pendingPoly) {
-    drawZoneShape(pendingPoly, moveActive ? ROSE_FILL_MOVE : ROSE_FILL, ROSE_STROKE, true);
+    drawZoneShape(pendingPoly, moveActive ? ZONE_FILL_MOVE : ZONE_FILL, ZONE_STROKE, true);
     const px = pendingPoly.map(p => ({ x: p[0] * canvas.width, y: p[1] * canvas.height }));
     const cx = px.reduce((s, p) => s + p.x, 0) / px.length;
     const cy = px.reduce((s, p) => s + p.y, 0) / px.length;
@@ -848,11 +1282,11 @@ function drawMoveHandle(cx, cy, active) {
   ctx.translate(cx, cy);
   ctx.shadowColor = 'rgba(0,0,0,0.25)';
   ctx.shadowBlur  = 4;
-  ctx.fillStyle   = active ? ROSE_STROKE : 'rgba(255,255,255,0.88)';
+  ctx.fillStyle   = active ? ZONE_STROKE : 'rgba(255,255,255,0.88)';
   ctx.beginPath(); ctx.roundRect(-s - gap, -s - gap, (s + gap) * 2, (s + gap) * 2, 5); ctx.fill();
   ctx.shadowBlur  = 0;
-  ctx.strokeStyle = active ? '#fff' : ROSE_LABEL;
-  ctx.fillStyle   = active ? '#fff' : ROSE_LABEL;
+  ctx.strokeStyle = active ? '#fff' : ACCENT;
+  ctx.fillStyle   = active ? '#fff' : ACCENT;
   ctx.lineWidth   = 2;
   ctx.lineCap     = 'round';
   ctx.beginPath(); ctx.moveTo(0, -s); ctx.lineTo(0, s); ctx.stroke();
@@ -866,8 +1300,8 @@ function drawMoveHandle(cx, cy, active) {
 
 function drawResizeHandle(x, y, active) {
   ctx.beginPath(); ctx.arc(x, y, HANDLE_R, 0, Math.PI * 2);
-  ctx.fillStyle = active ? ROSE_STROKE : '#fff';
-  ctx.strokeStyle = ROSE_STROKE; ctx.lineWidth = 2;
+  ctx.fillStyle = active ? ZONE_STROKE : '#fff';
+  ctx.strokeStyle = ZONE_STROKE; ctx.lineWidth = 2;
   ctx.fill(); ctx.stroke();
 }
 
@@ -889,172 +1323,153 @@ function drawLabel(text, cx, cy) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// ZONES — chips with rule counts + inline delete confirmation
+// ZONES — chips with rule-count badges + inline delete confirmation
 // ═════════════════════════════════════════════════════════════════════════════
 
 function renderZoneList() {
-  const wrap = document.getElementById('zonesList');
-  wrap.innerHTML = '';
-  Object.keys(savedZones).forEach(name => {
+  zonesListEl.innerHTML = '';
+  const names = Object.keys(savedZones);
+
+  if (names.length === 0) {
+    const empty = el('p', 'empty-state', 'No zones yet — ');
+    const link = el('button', 'empty-state-action', 'draw one on the feed');
+    link.type = 'button';
+    link.addEventListener('click', toggleDrawMode);
+    empty.appendChild(link);
+    zonesListEl.appendChild(empty);
+  }
+
+  names.forEach(name => {
     const count = rules.filter(r => r.zone === name).length;
 
-    const chip = document.createElement('div');
-    chip.className = 'zone-chip';
+    const chip = el('div', 'zone-chip');
 
-    const nm = document.createElement('span');
-    nm.className = 'chip-name';
-    nm.textContent = name;
-    chip.appendChild(nm);
+    chip.appendChild(el('span', 'chip-name', name));
 
     if (count > 0) {
-      const ct = document.createElement('span');
-      ct.className = 'chip-count';
-      ct.textContent = count;
+      const ct = el('span', 'chip-count', String(count));
       ct.title = count === 1 ? '1 rule assigned' : `${count} rules assigned`;
       chip.appendChild(ct);
     }
 
-    const del = document.createElement('button');
+    const del = el('button', 'chip-del', '×');
     del.type = 'button';
-    del.className = 'chip-del';
-    del.textContent = '×';
     del.title = 'Delete zone';
     del.addEventListener('click', () => chip.classList.add('confirming'));
     chip.appendChild(del);
 
-    const confirm = document.createElement('span');
-    confirm.className = 'chip-confirm';
-    const confirmText = document.createElement('span');
-    confirmText.className = 'chip-confirm-text';
-    confirmText.textContent = 'Delete?';
-    const yes = document.createElement('button');
+    const confirm = el('span', 'chip-confirm');
+    confirm.appendChild(el('span', 'chip-confirm-text', 'Delete?'));
+    const yes = el('button', 'chip-confirm-yes', 'Delete');
     yes.type = 'button';
-    yes.className = 'chip-confirm-yes';
-    yes.textContent = 'Delete';
     yes.addEventListener('click', () => deleteZone(name));
-    const no = document.createElement('button');
+    const no = el('button', 'chip-confirm-no', 'Cancel');
     no.type = 'button';
-    no.className = 'chip-confirm-no';
-    no.textContent = 'Cancel';
     no.addEventListener('click', () => chip.classList.remove('confirming'));
-    confirm.appendChild(confirmText);
     confirm.appendChild(yes);
     confirm.appendChild(no);
     chip.appendChild(confirm);
 
-    wrap.appendChild(chip);
+    zonesListEl.appendChild(chip);
   });
+
+  zonesSubEl.textContent = names.length === 0
+    ? 'Draw a zone on the feed, then attach rules to it'
+    : `${names.length} zone${names.length === 1 ? '' : 's'} drawn`;
 }
 
-// Zone deletion is cascaded server-side (rules_store.clear_zone_references) —
-// any rule that referenced the deleted zone comes back with zone_name: null
-// and zone_name_cleared: true, so we just reload rules from the backend.
+// Zone deletion cascades server-side — rules that referenced the zone come
+// back with zone_name: null and zone_name_cleared: true, so reload rules.
 function deleteZone(name) {
-  fetch(`/zones/${encodeURIComponent(name)}`, { method: 'DELETE' })
-    .then(r => r.json())
+  fetchJson(`/zones/${encodeURIComponent(name)}`, { method: 'DELETE' })
     .then(d => {
       if (!d.ok) return;
       delete savedZones[name];
       loadRules();
       renderZoneList();
+      renderHistoryZoneChips();
       redraw();
-    });
-}
-
-function clearAllZones() {
-  Promise.all(
-    Object.keys(savedZones).map(n => fetch(`/zones/${encodeURIComponent(n)}`, { method: 'DELETE' }))
-  ).then(() => {
-    savedZones = {};
-    loadRules();
-    renderZoneList();
-    redraw();
-  });
+    })
+    .catch(() => toast('Failed to delete zone'));
 }
 
 function loadZones() {
-  fetch('/zones').then(r => r.json())
+  return fetchJson('/zones')
     .then(d => {
       savedZones = d.zones || {};
       renderZoneList();
       syncZoneSelect();
+      renderHistoryZoneChips();
       redraw();
-    });
+    })
+    .catch(() => {});
+}
+
+function syncZoneSelect() {
+  const prev = zoneSelectEl.value;
+  zoneSelectEl.innerHTML = '';
+  const whole = el('option', null, 'Whole frame');
+  whole.value = '';
+  zoneSelectEl.appendChild(whole);
+  Object.keys(savedZones).forEach(name => {
+    const o = el('option', null, name);
+    o.value = name;
+    zoneSelectEl.appendChild(o);
+  });
+  zoneSelectEl.value = prev && savedZones[prev] ? prev : '';
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// RULES — synced with the backend's shared rules_store (/rules), so the same
-// rules and zone assignments are used by live monitoring and demo analysis.
+// RULES — synced with the backend's shared rules store, so the same rules and
+// zone assignments drive live monitoring.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const RULE_LIBRARY_MANUFACTURING = {
-  'People':   ['Person present in the frame', 'Person loitering in view', 'Multiple people gathered', 'Person lying or collapsed on the floor', 'Person running'],
+const RULE_LIBRARY = {
+  'People':   ['Person present in the frame', 'Person loitering in view', 'Multiple people gathered',
+               'Person lying or collapsed on the floor', 'Person running'],
   'Objects':  ['Object left behind', 'Object missing from view', 'Unattended bag or package'],
   'Safety':   ['Person without a helmet', 'Smoke or fire visible', 'Door left open', 'Spill on the floor'],
   'Vehicles': ['Vehicle present in the driveway', 'Vehicle parked illegally', 'Vehicle reversing'],
 };
 
-const RULE_LIBRARY_OTHER = {
-  'Retail':      ['Queue too long', 'Shelf empty', 'Unattended counter'],
-  'Hospitality': ['Uncleared table', 'Pool unattended'],
-  'Vehicle':     ['Vehicle present in driveway', 'Illegal parking', 'Vehicle reversing'],
-  'Home':        ['Person at front door', 'Unattended package present at the door'],
-};
-
 function loadRules() {
-  fetch('/rules').then(r => r.json()).then(d => {
-    rules = (d.rules || []).map(r => ({
-      id: r.id,
-      text: r.rule_text,
-      zone: r.zone_name,
-      enabled: r.enabled,
-      zoneCleared: r.zone_name_cleared,
-      ruleType: r.rule_type || 'standard',
-    }));
-    renderRules();
-    renderZoneList();
-    updateStartDisabled();
-    renderDemoSources();
-  }).catch(() => {});
+  return fetchJson('/rules')
+    .then(d => {
+      rules = (d.rules || []).map(r => ({
+        id: r.id,
+        text: r.rule_text,
+        zone: r.zone_name,
+        enabled: r.enabled,
+        zoneCleared: r.zone_name_cleared,
+      }));
+      renderRules();
+      renderZoneList();
+      updateStartDisabled();
+    })
+    .catch(() => {});
 }
 
-function addRule(text, zone, ruleType, requiredPpe, subject, hazard) {
+function addRule(text, zone) {
   text = (text || '').trim();
   if (!text || monitoringActive) return;
   const zoneName = zone && savedZones[zone] ? zone : null;
-  const body = { rule_text: text, zone_name: zoneName };
-  if (ruleType === 'ppe_check') {
-    body.rule_type = 'ppe_check';
-    body.required_ppe = requiredPpe || [];
-  } else if (ruleType === 'proximity') {
-    body.rule_type = 'proximity';
-    body.subject = subject || '';
-    body.hazard = hazard || '';
-  }
-  fetch('/rules', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-    .then(r => r.json())
-    .then(d => { if (d.ok) loadRules(); });
+  fetchJson('/rules', { method: 'POST', body: { rule_text: text, zone_name: zoneName } })
+    .then(d => {
+      if (!d.ok) { toast(d.error || 'Failed to add rule'); return; }
+      loadRules();
+    })
+    .catch(() => toast('Failed to add rule'));
 }
 
 function renderRules() {
-  const list = document.getElementById('rulesList');
-  list.innerHTML = '';
-  if (rules.length === 0) {
-    const p = document.createElement('p');
-    p.className = 'rules-empty';
-    p.textContent = 'No rules yet';
-    list.appendChild(p);
-  }
-  rules.forEach(r => {
-    const wrap = document.createElement('div');
-    wrap.className = 'rule-item';
+  rulesListEl.innerHTML = '';
 
-    const row = document.createElement('div');
-    row.className = 'rule-row' + (r.enabled ? '' : ' disabled');
+  if (rules.length === 0) {
+    rulesListEl.appendChild(el('p', 'rules-empty', 'No rules yet — describe one above or pick from the library'));
+  }
+
+  rules.forEach(r => {
+    const row = el('div', 'rule-row' + (r.enabled ? '' : ' disabled'));
 
     const check = document.createElement('input');
     check.type = 'checkbox';
@@ -1062,296 +1477,82 @@ function renderRules() {
     check.checked = r.enabled;
     check.title = r.enabled ? 'Disable rule' : 'Enable rule';
     check.addEventListener('change', () => {
-      fetch(`/rules/${encodeURIComponent(r.id)}/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: check.checked }),
+      fetchJson(`/rules/${encodeURIComponent(r.id)}/toggle`, {
+        method: 'POST', body: { enabled: check.checked },
       }).then(() => loadRules());
     });
-
-    const text = document.createElement('span');
-    text.className = 'rule-text';
-    text.textContent = r.text;
-    text.title = r.text;
-
     row.appendChild(check);
+
+    const text = el('span', 'rule-text', r.text);
+    text.title = r.text;
     row.appendChild(text);
 
-    if (r.ruleType === 'ppe_check') {
-      const pb = document.createElement('span');
-      pb.className = 'rule-ppe-badge';
-      pb.textContent = 'PPE';
-      pb.title = 'PPE compliance check';
-      row.appendChild(pb);
-    } else if (r.ruleType === 'proximity') {
-      const pb = document.createElement('span');
-      pb.className = 'rule-ppe-badge';
-      pb.textContent = 'PROX';
-      pb.title = 'Proximity rule';
-      row.appendChild(pb);
-    }
-
-    // zone assignment is always shown, immediately, so a null-zone save
-    // (e.g. the composer's dropdown not being what the user thought) is
-    // visible right away instead of silently evaluating the whole frame
     if (r.zone) {
-      const zb = document.createElement('span');
-      zb.className = 'rule-zone';
-      zb.textContent = r.zone;
+      const zb = el('span', 'rule-zone', r.zone);
       zb.title = r.zone;
       row.appendChild(zb);
     } else if (r.zoneCleared) {
-      const wb = document.createElement('span');
-      wb.className = 'rule-zone-warning';
-      wb.textContent = 'Zone deleted — whole frame';
+      const wb = el('span', 'rule-zone-warning', 'Zone deleted — whole frame');
       wb.title = 'Its assigned zone was deleted; this rule now evaluates the whole frame.';
       row.appendChild(wb);
     } else {
-      const nb = document.createElement('span');
-      nb.className = 'rule-zone-whole';
-      nb.textContent = 'Whole frame';
-      row.appendChild(nb);
+      row.appendChild(el('span', 'rule-zone-whole', 'Whole frame'));
     }
 
-    const editZoneBtn = document.createElement('button');
-    editZoneBtn.type = 'button';
-    editZoneBtn.className = 'rule-edit-zone';
-    editZoneBtn.textContent = 'Edit zone';
-    editZoneBtn.title = 'Change zone assignment';
-    row.appendChild(editZoneBtn);
-
-    const del = document.createElement('button');
+    const del = el('button', 'rule-del', '×');
     del.type = 'button';
-    del.className = 'rule-del';
-    del.textContent = '×';
     del.title = 'Remove rule';
     del.addEventListener('click', () => {
-      fetch(`/rules/${encodeURIComponent(r.id)}`, { method: 'DELETE' })
+      fetchJson(`/rules/${encodeURIComponent(r.id)}`, { method: 'DELETE' })
         .then(() => loadRules());
     });
-
     row.appendChild(del);
-    wrap.appendChild(row);
 
-    // inline zone editor — hidden until "Edit zone" is clicked
-    const editorRow = document.createElement('div');
-    editorRow.className = 'rule-zone-editor';
-    editorRow.hidden = true;
-
-    const zoneSel = document.createElement('select');
-    const wholeOpt = document.createElement('option');
-    wholeOpt.value = '';
-    wholeOpt.textContent = 'Whole frame';
-    zoneSel.appendChild(wholeOpt);
-    Object.keys(savedZones).forEach(name => {
-      const o = document.createElement('option');
-      o.value = name;
-      o.textContent = name;
-      zoneSel.appendChild(o);
-    });
-    zoneSel.value = r.zone && savedZones[r.zone] ? r.zone : '';
-
-    const saveZoneBtn = document.createElement('button');
-    saveZoneBtn.type = 'button';
-    saveZoneBtn.className = 'rule-zone-save';
-    saveZoneBtn.textContent = 'Save';
-    saveZoneBtn.addEventListener('click', () => {
-      fetch(`/rules/${encodeURIComponent(r.id)}/zone`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zone_name: zoneSel.value || null }),
-      })
-        .then(resp => resp.json())
-        .then(d => { if (d.ok) loadRules(); });
-    });
-
-    const cancelZoneBtn = document.createElement('button');
-    cancelZoneBtn.type = 'button';
-    cancelZoneBtn.className = 'rule-zone-cancel';
-    cancelZoneBtn.textContent = 'Cancel';
-    cancelZoneBtn.addEventListener('click', () => { editorRow.hidden = true; });
-
-    editorRow.appendChild(zoneSel);
-    editorRow.appendChild(saveZoneBtn);
-    editorRow.appendChild(cancelZoneBtn);
-    wrap.appendChild(editorRow);
-
-    editZoneBtn.addEventListener('click', () => { editorRow.hidden = !editorRow.hidden; });
-
-    list.appendChild(wrap);
+    rulesListEl.appendChild(row);
   });
-  syncZoneSelect();
+
+  updateRulesSub();
 }
 
-function syncZoneSelect() {
-  const sel = document.getElementById('zoneSelect');
-  const prev = sel.value;
-  sel.innerHTML = '';
-  const whole = document.createElement('option');
-  whole.value = '';
-  whole.textContent = 'Whole frame';
-  sel.appendChild(whole);
-  Object.keys(savedZones).forEach(name => {
-    const o = document.createElement('option');
-    o.value = name;
-    o.textContent = name;
-    sel.appendChild(o);
-  });
-  sel.value = prev && savedZones[prev] ? prev : '';
-}
-
-// composer
-const ruleTypeSelectEl        = document.getElementById('ruleTypeSelect');
-const ppeChecklistEl          = document.getElementById('ppeChecklist');
-const proximitySubjectInputEl = document.getElementById('proximitySubjectInput');
-const proximityHazardInputEl  = document.getElementById('proximityHazardInput');
-
-function ppeItemLabel(cb) {
-  return cb.parentElement.textContent.trim();
-}
-
-function checkedPpeItems() {
-  return Array.from(ppeChecklistEl.querySelectorAll('input[type="checkbox"]:checked'))
-    .map(cb => cb.value);
-}
-
-ruleTypeSelectEl.addEventListener('change', () => {
-  const isPpe       = ruleTypeSelectEl.value === 'ppe_check';
-  const isProximity = ruleTypeSelectEl.value === 'proximity';
-  document.getElementById('ruleInput').hidden = isPpe || isProximity;
-  ppeChecklistEl.hidden = !isPpe;
-  proximitySubjectInputEl.hidden = !isProximity;
-  proximityHazardInputEl.hidden = !isProximity;
-});
-
-document.getElementById('addRuleBtn').addEventListener('click', () => {
-  const zone = document.getElementById('zoneSelect').value;
-  if (ruleTypeSelectEl.value === 'ppe_check') {
-    const items = checkedPpeItems();
-    if (items.length === 0) return;
-    const shortLabels = Array.from(ppeChecklistEl.querySelectorAll('input[type="checkbox"]:checked'))
-      .map(cb => ppeItemLabel(cb));
-    const text = `PPE check: ${shortLabels.join(', ')}`;
-    addRule(text, zone, 'ppe_check', items);
-    ppeChecklistEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-  } else if (ruleTypeSelectEl.value === 'proximity') {
-    const subject = proximitySubjectInputEl.value.trim();
-    const hazard  = proximityHazardInputEl.value.trim();
-    if (!subject || !hazard) return;
-    const text = `Proximity: ${subject} near ${hazard}`;
-    addRule(text, zone, 'proximity', null, subject, hazard);
-    proximitySubjectInputEl.value = '';
-    proximityHazardInputEl.value = '';
-  } else {
-    const input = document.getElementById('ruleInput');
-    addRule(input.value, zone);
-    input.value = '';
-    input.focus();
+function updateRulesSub() {
+  if (monitoringActive) {
+    rulesSubEl.textContent = 'Locked while monitoring';
+    return;
   }
+  const enabled = rules.filter(r => r.enabled).length;
+  rulesSubEl.textContent = rules.length === 0
+    ? ''
+    : `${enabled} of ${rules.length} enabled`;
+}
+
+// composer — text input + zone select + Add
+addRuleBtnEl.addEventListener('click', () => {
+  const text = ruleInputEl.value;
+  addRule(text, zoneSelectEl.value);
+  ruleInputEl.value = '';
+  ruleInputEl.focus();
 });
 
-document.getElementById('ruleInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('addRuleBtn').click();
+ruleInputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addRuleBtnEl.click();
 });
 
-// rule library dropdown overlay
-const PROXIMITY_PRESETS = [
-  { label: 'Person near forklift',              subject: 'a person', hazard: 'a forklift' },
-  { label: 'Person under suspended load',       subject: 'a person', hazard: 'a suspended load' },
-  { label: 'Hand near cutting blade',           subject: 'a hand',   hazard: 'a cutting blade' },
-  { label: 'Person near moving conveyor',       subject: 'a person', hazard: 'a moving conveyor' },
-  { label: 'Person near open electrical panel', subject: 'a person', hazard: 'an open electrical panel' },
-  { label: 'Worker near unguarded machine',     subject: 'a worker', hazard: 'an unguarded machine' },
-];
-
-function useProximityPreset(preset) {
-  ruleTypeSelectEl.value = 'proximity';
-  ruleTypeSelectEl.dispatchEvent(new Event('change'));
-  document.getElementById('proximitySubjectInput').value = preset.subject;
-  document.getElementById('proximityHazardInput').value = preset.hazard;
-}
-
-function appendProximityPresets(container) {
-  const h = document.createElement('div');
-  h.className = 'library-category';
-  h.textContent = 'Proximity';
-  container.appendChild(h);
-  PROXIMITY_PRESETS.forEach(preset => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'library-item';
-    b.textContent = preset.label;
-    b.addEventListener('click', () => {
-      useProximityPreset(preset);
-      toggleRuleLibrary(false);
-    });
-    container.appendChild(b);
-  });
-}
-
-function appendLibraryCategories(container, categories) {
-  Object.entries(categories).forEach(([cat, items]) => {
-    const h = document.createElement('div');
-    h.className = 'library-category';
-    h.textContent = cat;
-    container.appendChild(h);
-    items.forEach(text => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'library-item';
-      b.textContent = text;
-      b.addEventListener('click', () => {
-        addRule(text, document.getElementById('zoneSelect').value);
-        toggleRuleLibrary(false);
-      });
-      container.appendChild(b);
-    });
-  });
-}
-
+// rule library dropdown
 function renderRuleLibrary() {
   const lib = document.getElementById('ruleLibrary');
   lib.innerHTML = '';
-
-  // section 1 — Smart Manufacturing, expanded by default
-  const mfgSection = document.createElement('div');
-  mfgSection.className = 'library-section';
-  const mfgTitle = document.createElement('div');
-  mfgTitle.className = 'library-section-title';
-  mfgTitle.textContent = 'Smart Manufacturing';
-  mfgSection.appendChild(mfgTitle);
-  appendLibraryCategories(mfgSection, RULE_LIBRARY_MANUFACTURING);
-  appendProximityPresets(mfgSection);
-  lib.appendChild(mfgSection);
-
-  // section 2 — Other Use Cases, collapsed by default behind "Show more"
-  const otherSection = document.createElement('div');
-  otherSection.className = 'library-section';
-
-  const showMoreBtn = document.createElement('button');
-  showMoreBtn.type = 'button';
-  showMoreBtn.className = 'library-show-more';
-  showMoreBtn.textContent = 'Show more';
-
-  const collapse = document.createElement('div');
-  collapse.className = 'library-collapse';
-  collapse.id = 'libraryOtherCollapse';
-
-  const otherTitle = document.createElement('div');
-  otherTitle.className = 'library-section-title';
-  otherTitle.textContent = 'Other Use Cases';
-  collapse.appendChild(otherTitle);
-  appendLibraryCategories(collapse, RULE_LIBRARY_OTHER);
-
-  showMoreBtn.addEventListener('click', () => {
-    const expanded = collapse.classList.toggle('expanded');
-    showMoreBtn.textContent = expanded ? 'Show less' : 'Show more';
-    collapse.style.maxHeight = expanded ? collapse.scrollHeight + 'px' : '0px';
+  Object.entries(RULE_LIBRARY).forEach(([category, items]) => {
+    lib.appendChild(el('div', 'library-category', category));
+    items.forEach(text => {
+      const b = el('button', 'library-item', text);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        addRule(text, zoneSelectEl.value);
+        toggleRuleLibrary(false);
+      });
+      lib.appendChild(b);
+    });
   });
-
-  otherSection.appendChild(showMoreBtn);
-  otherSection.appendChild(collapse);
-  lib.appendChild(otherSection);
 }
 
 function toggleRuleLibrary(force) {
@@ -1372,95 +1573,99 @@ document.addEventListener('click', (e) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// MONITORING + ALERTS
+// MONITORING — enabled rules are combined into one rule string
+// ("rule text in the zone zone") and POSTed to /start.
 // ═════════════════════════════════════════════════════════════════════════════
-
-let pollInterval = null;
 
 function updateStartDisabled() {
   if (monitoringActive) return;
-  const startBtn = document.getElementById('startBtn');
   const hasRule = rules.filter(r => r.enabled).length > 0;
-
-  if (feedMode === 'demo') {
-    const missing = [];
-    if (!demoVideoLoaded) missing.push('a video');
-    if (!hasRule) missing.push('an enabled rule');
-    startBtn.disabled = missing.length > 0;
-    startBtn.dataset.tip = missing.length > 0
-      ? `Add ${missing.join(' and ')} before starting analysis`
-      : '';
-  } else {
-    startBtn.disabled = !hasRule;
-    startBtn.dataset.tip = 'Add at least one enabled rule to start monitoring';
-  }
+  startBtn.disabled = !hasRule;
+  startBtn.dataset.tip = hasRule
+    ? ''
+    : 'Add at least one enabled rule to start monitoring';
 }
 
-// the backend's DetectorThread pulls enabled rules (with their own zone scoping)
-// straight from the shared rules_store every cycle — the "rule" field here is
-// just a required non-empty placeholder for the /start endpoint.
+function combinedRuleString() {
+  return rules
+    .filter(r => r.enabled)
+    .map(r => r.zone ? `${r.text} in the zone ${r.zone}` : r.text)
+    .join('; ');
+}
+
 function startMonitoring() {
-  if (feedMode === 'demo') {
-    startDemoRun();
+  if (rules.filter(r => r.enabled).length === 0) return;
+  if (feedMode === 'demo' && !demoSourceReady) {
+    toast('No demo video available on the server — cannot monitor');
     return;
   }
-  if (rules.filter(r => r.enabled).length === 0) return;
-  fetch('/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rule: 'multi-rule' }),
-  }).then(() => { setMonitoringUI(true); startPolling(); });
+  const rule = combinedRuleString();
+  fetchJson('/start', { method: 'POST', body: { rule } })
+    .then(d => {
+      if (!d.ok) { toast(d.error || 'Failed to start monitoring'); return; }
+      setMonitoringUI(true);
+      pollAlerts();
+    })
+    .catch(() => toast('Failed to start monitoring'));
 }
 
 function stopMonitoring() {
-  if (feedMode === 'demo') {
-    cancelDemoRun();
-    return;
-  }
-  fetch('/stop', { method: 'POST' }).then(() => setMonitoringUI(false));
+  fetchJson('/stop', { method: 'POST' })
+    .then(() => setMonitoringUI(false))
+    .catch(() => toast('Failed to stop monitoring'));
 }
 
-function setMonitoringUI(active, label) {
+function setMonitoringUI(active) {
   monitoringActive = active;
-  document.getElementById('startBtn').hidden = active;
-  document.getElementById('stopBtn').hidden = !active;
-  document.getElementById('statusBadge').classList.toggle('active', active);
-  document.getElementById('statusLabel').textContent = active ? (label || 'Monitoring') : 'Idle';
-  document.querySelector('.rules-card').classList.toggle('locked', active);
+  startBtn.hidden = active;
+  stopBtn.hidden = !active;
+  statusBadgeEl.classList.toggle('active', active);
+  statusLabelEl.textContent = active ? 'Monitoring' : 'Idle';
+  rulesCardEl.classList.toggle('locked', active);
+  updateUploadControls();
+  updateRulesSub();
   if (!active) updateStartDisabled();
 }
 
-function startPolling() {
-  if (pollInterval) return;
-  pollInterval = setInterval(pollAlerts, 2000);
+startBtn.addEventListener('click', startMonitoring);
+stopBtn.addEventListener('click', stopMonitoring);
+drawBtn.addEventListener('click', toggleDrawMode);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ALERTS — poll /alerts/json every 2s; rebuild the list each poll. New alerts
+// animate in; previously-seen ones are re-rendered without animation.
+// ═════════════════════════════════════════════════════════════════════════════
+
+let currentAlerts = [];
+const seenAlertIds = new Set();
+let alertPollInterval = null;
+
+function startAlertPolling() {
+  if (alertPollInterval) return;
+  alertPollInterval = setInterval(pollAlerts, 2000);
   pollAlerts();
 }
 
 function pollAlerts() {
-  fetch('/alerts/json').then(r => r.json()).then(data => {
-    // sync UI with backend state — monitoring may have been started/stopped
-    // elsewhere. Skip this while a demo run is active: that has its own
-    // poll loop (pollDemoRun) driving the same Start/Stop button, and this
-    // live-mode poll would otherwise stomp it back to "Start" every 2s.
-    if (!demoActive) {
+  fetchJson('/alerts/json')
+    .then(data => {
       setMonitoringUI(!!data.monitoring);
-    }
-    updateLiveAlerts(data.alerts || []);
-  }).catch(() => {});
+      updateAlerts(data.alerts || []);
+    })
+    .catch(() => {});
 }
 
-// separate alert histories per mode (Option A) — switching Live/Demo never
-// clears either array, it just changes which one is currently rendered
-let liveAlerts = [];
-let demoAlerts = [];
-
-function currentAlerts() {
-  return feedMode === 'demo' ? demoAlerts : liveAlerts;
+function updateAlerts(alerts) {
+  const hasNew = alerts.some(a => a.id && !seenAlertIds.has(a.id));
+  currentAlerts = alerts;
+  renderAlerts();
+  if (hasNew) loadDigest();
 }
 
 function buildAlertRow(alert) {
-  const row = document.createElement('div');
-  row.className = 'alert-row';
+  const sev = alert.severity || 'low';
+  const row = el('div', `alert-row sev-${sev}`);
+  if (alert.id && !seenAlertIds.has(alert.id)) row.classList.add('is-new');
 
   const img = document.createElement('img');
   img.className = 'alert-thumb';
@@ -1468,429 +1673,358 @@ function buildAlertRow(alert) {
   img.alt = 'Alert frame';
   img.loading = 'lazy';
   img.addEventListener('click', () => openLightbox(alert));
-
-  const dl = document.createElement('button');
-  dl.type = 'button';
-  dl.className = 'alert-download';
-  dl.textContent = '⬇';
-  dl.title = 'Download image';
-  dl.addEventListener('click', (e) => { e.stopPropagation(); downloadAlertImage(alert); });
-
-  const body = document.createElement('div');
-  body.className = 'alert-body';
-
-  const expl = document.createElement('p');
-  expl.className = 'alert-explanation';
-  expl.textContent = alert.explanation || '';
-
-  body.appendChild(expl);
-
-  if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
-    body.appendChild(buildPpeChecklist(alert.items));
-  }
-
-  const meta = document.createElement('p');
-  meta.className = 'alert-meta';
-  if (alert.rule_type === 'proximity' && (alert.proximity === 'touching' || alert.proximity === 'very_close')) {
-    const badge = document.createElement('span');
-    badge.className = 'proximity-badge';
-    badge.textContent = alert.proximity === 'touching' ? 'TOUCHING' : 'VERY CLOSE';
-    meta.appendChild(badge);
-  }
-  meta.appendChild(document.createTextNode(alertMetaText(alert)));
-  body.appendChild(meta);
   row.appendChild(img);
-  row.appendChild(dl);
+
+  const body = el('div', 'alert-body');
+
+  const top = el('div', 'alert-top');
+  top.appendChild(el('span', 'alert-time', formatTime(alert.timestamp)));
+  top.appendChild(el('span', `severity-badge sev-${sev}`, SEVERITY_LABEL[sev] || 'Low'));
+  body.appendChild(top);
+
+  body.appendChild(el('p', 'alert-explanation', alert.explanation || ''));
+
+  const metaParts = [
+    alert.rule,
+    alert.zone,
+    confidencePct(alert.confidence),
+  ].filter(Boolean);
+  body.appendChild(el('p', 'alert-meta', metaParts.join(' · ')));
+
   row.appendChild(body);
   return row;
 }
 
-// full rebuild from whichever array matches the current mode — cheap given
-// the small size of both lists (live keeps the backend's last 10; demo runs
-// rarely exceed ~40), and avoids any stale-DOM/id-dedup bugs across switches
-function renderAlertsList() {
-  const list    = document.getElementById('alertsList');
-  const empty   = document.getElementById('emptyState');
-  const countEl = document.getElementById('alertCount');
-  const labelEl = document.getElementById('alertsContextLabel');
+function renderAlerts() {
+  alertsListEl.innerHTML = '';
+  alertCountEl.textContent = currentAlerts.length;
 
-  if (labelEl) labelEl.textContent = feedMode === 'demo' ? 'Demo run alerts' : 'Live monitoring alerts';
-
-  const alerts = currentAlerts();
-  countEl.textContent = alerts.length;
-
-  list.querySelectorAll('.alert-row').forEach(el => el.remove());
-
-  if (alerts.length === 0) {
-    empty.style.display = '';
+  if (currentAlerts.length === 0) {
+    alertsListEl.appendChild(el('p', 'empty-state', 'No alerts yet — they will appear here while monitoring'));
     return;
   }
-  empty.style.display = 'none';
 
-  // live alerts arrive newest-first from the backend already; demo alerts
-  // accumulate oldest-first over the run — reverse so newest is always on
-  // top, consistent between modes
-  const displayOrder = feedMode === 'demo' ? alerts.slice().reverse() : alerts;
   const frag = document.createDocumentFragment();
-  displayOrder.forEach(alert => frag.appendChild(buildAlertRow(alert)));
-  list.appendChild(frag);
-}
+  currentAlerts.forEach(alert => frag.appendChild(buildAlertRow(alert)));
+  alertsListEl.appendChild(frag);
 
-function updateLiveAlerts(alerts) {
-  liveAlerts = alerts;
-  if (feedMode !== 'demo') {
-    renderAlertsList();
-    if (typeof loadDigestStats === 'function') loadDigestStats();
-  }
-}
-
-function updateDemoAlerts(alerts) {
-  demoAlerts = alerts;
-  if (feedMode === 'demo') renderAlertsList();
-}
-
-const PPE_STATUS_LABEL = { present: 'Present', missing: 'Missing', not_visible: 'Not visible' };
-
-function buildPpeChecklistRows(items) {
-  const frag = document.createDocumentFragment();
-  items.forEach(item => {
-    const row = document.createElement('div');
-    row.className = 'ppe-item';
-    const dot = document.createElement('span');
-    dot.className = `ppe-dot ppe-dot-${item.status || 'not_visible'}`;
-    const name = document.createElement('span');
-    name.className = 'ppe-item-name';
-    name.textContent = item.name;
-    const status = document.createElement('span');
-    status.className = 'ppe-item-status';
-    status.textContent = PPE_STATUS_LABEL[item.status] || item.status || '';
-    row.appendChild(dot);
-    row.appendChild(name);
-    row.appendChild(status);
-    frag.appendChild(row);
-  });
-  return frag;
-}
-
-function buildPpeChecklist(items) {
-  const wrap = document.createElement('div');
-  wrap.className = 'ppe-checklist-result';
-  wrap.appendChild(buildPpeChecklistRows(items));
-  return wrap;
-}
-
-function alertMetaText(alert) {
-  const parts = [
-    alert.rule,
-    alert.zone,
-    formatTime(alert.timestamp),
-    `${Math.round((alert.confidence || 0) * 100)}%`,
-  ].filter(Boolean);
-  return parts.join(' · ');
-}
-
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  // everything rendered is now "seen" — future polls re-render without animating
+  currentAlerts.forEach(a => { if (a.id) seenAlertIds.add(a.id); });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// ALERT IMAGE LIGHTBOX + DOWNLOAD
+// SHIFT DIGEST — /digest/json for the stats, /digest/ai for the generated text
 // ═════════════════════════════════════════════════════════════════════════════
 
-const lightboxBackdropEl = document.getElementById('lightboxBackdrop');
-const lightboxImgEl      = document.getElementById('lightboxImg');
-const lightboxExplEl     = document.getElementById('lightboxExplanation');
-const lightboxMetaEl     = document.getElementById('lightboxMeta');
-let lightboxAlert = null;
+const DIGEST_HOURS = 24;
+let digestData = null;
 
-function alertDownloadFilename(alert) {
-  const d = new Date(alert.timestamp);
-  const pad = (n) => String(n).padStart(2, '0');
-  const stamp =
-    `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-` +
-    `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  return `openeye-alert-${stamp}.jpg`;
+function loadDigest() {
+  fetchJson(`/digest/json?hours=${DIGEST_HOURS}`)
+    .then(d => {
+      digestData = d;
+      renderDigest();
+    })
+    .catch(() => {
+      digestSubtitleEl.textContent = 'Stats unavailable';
+    });
 }
 
-function downloadAlertImage(alert) {
-  const a = document.createElement('a');
-  a.href = alert.thumbnail;
-  a.download = alertDownloadFilename(alert);
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+function periodLabel() {
+  return `the last ${DIGEST_HOURS} hours`;
 }
 
-const lightboxPpeEl = document.getElementById('lightboxPpeChecklist');
+function renderDigest() {
+  if (!digestData) return;
+  const total = digestData.total || 0;
+  digestSubtitleEl.textContent =
+    `${total} incident${total === 1 ? '' : 's'} in ${periodLabel()}`;
 
-function openLightbox(alert) {
-  lightboxAlert = alert;
-  lightboxImgEl.src = alert.thumbnail;
-  lightboxExplEl.textContent = alert.explanation || '';
-
-  lightboxPpeEl.innerHTML = '';
-  if (alert.rule_type === 'ppe_check' && Array.isArray(alert.items)) {
-    lightboxPpeEl.appendChild(buildPpeChecklistRows(alert.items));
-    lightboxPpeEl.hidden = false;
-  } else {
-    lightboxPpeEl.hidden = true;
-  }
-
-  lightboxMetaEl.textContent = alertMetaText(alert);
-  lightboxBackdropEl.hidden = false;
-}
-
-function closeLightbox() {
-  lightboxBackdropEl.hidden = true;
-  lightboxAlert = null;
-}
-
-lightboxBackdropEl.addEventListener('click', (e) => {
-  if (e.target === lightboxBackdropEl) closeLightbox();
-});
-
-document.getElementById('lightboxCloseBtn').addEventListener('click', closeLightbox);
-
-document.getElementById('lightboxDownloadBtn').addEventListener('click', () => {
-  if (lightboxAlert) downloadAlertImage(lightboxAlert);
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !lightboxBackdropEl.hidden) closeLightbox();
-});
-
-// ═════════════════════════════════════════════════════════════════════════════
-// SHIFT DIGEST — collapsed-by-default card: /digest/stats for the summary line
-// and expanded stat list, /digest/generate for the on-demand AI text digest.
-// ═════════════════════════════════════════════════════════════════════════════
-
-const digestCardEl        = document.getElementById('digestCard');
-const digestTitleEl       = document.getElementById('digestTitle');
-const digestHeaderEl      = document.getElementById('digestHeader');
-const digestBodyEl        = document.getElementById('digestBody');
-const digestChevronEl     = document.getElementById('digestChevron');
-const digestSummaryLineEl = document.getElementById('digestSummaryLine');
-const digestStatsEl       = document.getElementById('digestStats');
-const generateDigestBtn   = document.getElementById('generateDigestBtn');
-const digestResultEl      = document.getElementById('digestResult');
-const digestDisclaimerEl  = document.getElementById('digestDisclaimer');
-const downloadDigestBtn   = document.getElementById('downloadDigestBtn');
-
-let latestDigestStats = null;
-let latestDigestText  = null;
-let demoRunCompleted  = false;   // true once a demo run has finished at least once
-let demoRunStartedAt  = null;    // client-side timestamp, used only for the stats preview
-
-const SEVERITY_DOT_CLASS = { high: 'severity-dot-high', medium: 'severity-dot-medium', low: 'severity-dot-low' };
-const SEVERITY_LABEL     = { high: 'High', medium: 'Medium', low: 'Low' };
-
-// live mode: "Shift Digest" / last 24h.  demo mode: "Analysis Report" / this run only.
-function digestScopeIsDemo() {
-  return feedMode === 'demo';
-}
-
-function digestPeriodLabel() {
-  return digestScopeIsDemo() ? 'in this demo run' : 'in the last 24 hours';
-}
-
-function updateDigestModeUI() {
-  digestTitleEl.textContent = digestScopeIsDemo() ? 'Analysis Report' : 'Shift Digest';
-  loadDigestStats();
-}
-
-function loadDigestStats() {
-  const isDemo = digestScopeIsDemo();
-  if (isDemo && !demoRunStartedAt) {
-    latestDigestStats = null;
-    digestSummaryLineEl.textContent = 'Run a demo analysis to see incidents here';
-    if (!digestBodyEl.hidden) renderDigestStats(null);
-    return;
-  }
-  const url = isDemo ? `/digest/stats?since=${encodeURIComponent(demoRunStartedAt)}` : '/digest/stats';
-  fetch(url).then(r => r.json()).then(d => {
-    if (!d.ok) return;
-    latestDigestStats = d.stats;
-    const total = d.stats.total || 0;
-    digestSummaryLineEl.textContent = `${total} incident${total === 1 ? '' : 's'} ${digestPeriodLabel()}`;
-    if (!digestBodyEl.hidden) renderDigestStats(latestDigestStats);
-  }).catch(() => {
-    digestSummaryLineEl.textContent = 'Stats unavailable';
-  });
-}
-
-function renderDigestStats(stats) {
   digestStatsEl.innerHTML = '';
-  if (!stats || stats.total === 0) {
-    const p = document.createElement('p');
-    p.className = 'digest-empty';
-    p.textContent = `No incidents logged ${digestPeriodLabel()}.`;
-    digestStatsEl.appendChild(p);
+
+  if (total === 0) {
+    digestStatsEl.appendChild(el('p', 'digest-empty', `No incidents logged in ${periodLabel()}.`));
     return;
   }
 
-  const zoneBlock = document.createElement('div');
-  zoneBlock.className = 'digest-stat-block';
-  const zoneTitle = document.createElement('div');
-  zoneTitle.className = 'digest-stat-title';
-  zoneTitle.textContent = 'By zone';
-  zoneBlock.appendChild(zoneTitle);
-  Object.entries(stats.by_zone || {}).forEach(([zone, count]) => {
-    const row = document.createElement('div');
-    row.className = 'digest-stat-row';
-    row.innerHTML = `<span>${escapeHtml(zone)}</span><span>${count}</span>`;
+  // By zone — rows clickable through to the history view
+  const zoneBlock = el('div');
+  zoneBlock.appendChild(el('div', 'digest-stat-title', 'By zone'));
+  Object.entries(digestData.by_zone || {}).forEach(([zone, count]) => {
+    const row = el('button', 'digest-stat-row');
+    row.type = 'button';
+    row.title = `View ${zone} incidents in History`;
+    row.appendChild(el('span', null, zone));
+    row.appendChild(el('span', 'digest-count', String(count)));
+    row.addEventListener('click', () => openHistoryFiltered({ zone }));
     zoneBlock.appendChild(row);
   });
   digestStatsEl.appendChild(zoneBlock);
 
-  const sevBlock = document.createElement('div');
-  sevBlock.className = 'digest-stat-block';
-  const sevTitle = document.createElement('div');
-  sevTitle.className = 'digest-stat-title';
-  sevTitle.textContent = 'By severity';
-  sevBlock.appendChild(sevTitle);
+  // By severity — rows clickable through to the history view
+  const sevBlock = el('div');
+  sevBlock.appendChild(el('div', 'digest-stat-title', 'By severity'));
   ['high', 'medium', 'low'].forEach(sev => {
-    const count = (stats.by_severity || {})[sev] || 0;
-    const row = document.createElement('div');
-    row.className = 'digest-stat-row';
-    const label = document.createElement('span');
-    label.className = 'digest-severity-label';
-    const dot = document.createElement('span');
-    dot.className = `severity-dot ${SEVERITY_DOT_CLASS[sev]}`;
-    label.appendChild(dot);
+    const count = (digestData.by_severity || {})[sev] || 0;
+    const row = el('button', 'digest-stat-row');
+    row.type = 'button';
+    row.title = `View ${SEVERITY_LABEL[sev]} incidents in History`;
+    const label = el('span', 'digest-severity-label');
+    label.appendChild(el('span', `severity-dot severity-dot-${sev}`));
     label.appendChild(document.createTextNode(SEVERITY_LABEL[sev]));
-    const countEl = document.createElement('span');
-    countEl.textContent = count;
     row.appendChild(label);
-    row.appendChild(countEl);
+    row.appendChild(el('span', 'digest-count', String(count)));
+    row.addEventListener('click', () => openHistoryFiltered({ severity: sev }));
     sevBlock.appendChild(row);
   });
   digestStatsEl.appendChild(sevBlock);
 
-  const hourBlock = document.createElement('div');
-  hourBlock.className = 'digest-stat-block';
-  hourBlock.innerHTML =
-    `<div class="digest-stat-title">Busiest hour</div>` +
-    `<div class="digest-stat-row"><span>${stats.busiest_hour ? escapeHtml(stats.busiest_hour) : '—'}</span></div>`;
+  // Busiest hour
+  const hourBlock = el('div');
+  hourBlock.appendChild(el('div', 'digest-stat-title', 'Busiest hour'));
+  const hourRow = el('div', 'digest-stat-row');
+  hourRow.appendChild(el('span', null, digestData.busiest_hour || '—'));
+  hourBlock.appendChild(hourRow);
   digestStatsEl.appendChild(hourBlock);
 }
 
-function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
+function openHistoryFiltered({ zone, severity } = {}) {
+  historyState.severities.clear();
+  historyState.zones.clear();
+  if (zone) historyState.zones.add(zone);
+  if (severity) historyState.severities.add(severity);
+  updateHistoryChips();
+  switchView('history');
 }
 
-digestHeaderEl.addEventListener('click', () => {
-  const expanding = digestBodyEl.hidden;
-  digestBodyEl.hidden = !expanding;
-  digestChevronEl.textContent = expanding ? '▴' : '▾';
-  if (expanding && latestDigestStats) renderDigestStats(latestDigestStats);
-});
+// AI digest generation — spinner on the button, result in the AI digest card
+function generateAIDigest() {
+  generateDigestBtn.classList.add('loading');
 
+  fetchJson('/digest/ai', { method: 'POST', body: { hours: DIGEST_HOURS } })
+    .then(d => {
+      generateDigestBtn.classList.remove('loading');
+      aiDigestCardEl.hidden = false;
+
+      if (d.stats) {
+        digestData = {
+          period_hours: DIGEST_HOURS,
+          total: d.stats.total,
+          by_zone: d.stats.by_zone,
+          by_severity: d.stats.by_severity,
+          busiest_hour: d.stats.busiest_hour,
+        };
+        renderDigest();
+      }
+
+      aiDigestResultEl.classList.remove('is-error');
+
+      if (d.error) {
+        aiDigestSubtitleEl.textContent = 'Generation failed';
+        aiDigestResultEl.textContent = d.error;
+        aiDigestResultEl.classList.add('is-error');
+      } else {
+        aiDigestSubtitleEl.textContent = d.summary || '';
+        if (d.digest) {
+          renderDigestText(d.digest);
+        } else {
+          aiDigestResultEl.textContent = d.summary || 'No incidents recorded.';
+        }
+      }
+
+      aiDigestCardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    })
+    .catch(() => {
+      generateDigestBtn.classList.remove('loading');
+      aiDigestCardEl.hidden = false;
+      aiDigestSubtitleEl.textContent = 'Generation failed';
+      aiDigestResultEl.textContent = 'Failed to generate digest.';
+      aiDigestResultEl.classList.add('is-error');
+    });
+}
+
+// strip markdown bold the model may add, then bold the numbered section
+// headers ourselves ("1) Summary", "2) Patterns", …)
 function renderDigestText(text) {
-  // strip any markdown bold the model added, then bold exactly the four
-  // numbered section headers ourselves ("1) Summary", "2) Patterns", …)
   const plain = text.replace(/\*\*/g, '');
   const escaped = escapeHtml(plain);
   const withHeaders = escaped.replace(
     /(^|\n)\s*(\d\)\s*[A-Za-z ]+?)(\s*[—:-])/g,
     (match, pre, header, sep) => `${pre}<strong>${header}</strong>${sep}`
   );
-  digestResultEl.innerHTML = withHeaders.replace(/\n/g, '<br>');
+  aiDigestResultEl.innerHTML = withHeaders.replace(/\n/g, '<br>');
 }
 
-function generateDigest() {
-  const scope = digestScopeIsDemo() ? 'demo_run' : '24h';
+generateDigestBtn.addEventListener('click', generateAIDigest);
 
-  generateDigestBtn.disabled = true;
-  generateDigestBtn.textContent = 'Generating…';
-  digestResultEl.hidden = true;
-  digestDisclaimerEl.hidden = true;
+// ═════════════════════════════════════════════════════════════════════════════
+// ALERT HISTORY — full-page view: time range + severity chips + zone chips
+// ═════════════════════════════════════════════════════════════════════════════
 
-  fetch('/digest/generate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scope }),
-  })
-    .then(r => r.json())
-    .then(d => {
-      generateDigestBtn.disabled = false;
-      generateDigestBtn.textContent = 'Generate AI digest';
+const historyState = {
+  hours: 24,
+  severities: new Set(),
+  zones: new Set(),
+};
+let historyRecords = [];
 
-      if (d.stats) {
-        latestDigestStats = d.stats;
-        renderDigestStats(latestDigestStats);
-      }
-
-      if (d.message && !d.digest) {
-        digestResultEl.hidden = false;
-        digestResultEl.textContent = d.message;
-        latestDigestText = null;
-        downloadDigestBtn.hidden = true;
-        return;
-      }
-
-      if (!d.ok) {
-        digestResultEl.hidden = false;
-        digestResultEl.textContent = d.error || 'Failed to generate digest.';
-        latestDigestText = null;
-        downloadDigestBtn.hidden = true;
-        return;
-      }
-
-      latestDigestText = d.digest;
-      digestResultEl.hidden = false;
-      renderDigestText(d.digest);
-      digestDisclaimerEl.hidden = false;
-      downloadDigestBtn.hidden = false;
-    })
-    .catch(() => {
-      generateDigestBtn.disabled = false;
-      generateDigestBtn.textContent = 'Generate AI digest';
-      digestResultEl.hidden = false;
-      digestResultEl.textContent = 'Failed to generate digest.';
+function renderHistoryZoneChips() {
+  zoneChipsEl.innerHTML = '';
+  ['Whole frame', ...Object.keys(savedZones)].forEach(name => {
+    const chip = el('button', 'filter-chip', name);
+    chip.type = 'button';
+    chip.dataset.zone = name;
+    chip.classList.toggle('active', historyState.zones.has(name));
+    chip.addEventListener('click', () => {
+      if (historyState.zones.has(name)) historyState.zones.delete(name);
+      else historyState.zones.add(name);
+      updateHistoryChips();
+      renderHistory();
     });
+    zoneChipsEl.appendChild(chip);
+  });
 }
 
-generateDigestBtn.addEventListener('click', generateDigest);
+severityChipsEl.querySelectorAll('.filter-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const sev = chip.dataset.sev;
+    if (historyState.severities.has(sev)) historyState.severities.delete(sev);
+    else historyState.severities.add(sev);
+    updateHistoryChips();
+    renderHistory();
+  });
+});
 
-function digestReportFilename() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  return `openeye-digest-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.txt`;
+historyRangeEl.addEventListener('change', () => {
+  historyState.hours = parseInt(historyRangeEl.value, 10) || 24;
+  loadHistory();
+});
+
+function updateHistoryChips() {
+  zoneChipsEl.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.classList.toggle('active', historyState.zones.has(chip.dataset.zone));
+  });
+  severityChipsEl.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.classList.toggle('active', historyState.severities.has(chip.dataset.sev));
+  });
 }
 
-downloadDigestBtn.addEventListener('click', () => {
-  if (!latestDigestText) return;
-  const stats = latestDigestStats || {};
-  const lines = [
-    digestScopeIsDemo() ? 'OpenEye Analysis Report' : 'OpenEye Shift Digest',
-    new Date().toString(),
-    '',
-    latestDigestText,
-    '',
-    'AI-generated summary based on logged incidents. Review before acting.',
-    '',
-    `--- Statistics (${digestPeriodLabel()}) ---`,
-    `Total incidents: ${stats.total || 0}`,
-    '',
-    'By zone:',
-    ...Object.entries(stats.by_zone || {}).map(([z, c]) => `  ${z}: ${c}`),
-    '',
-    'By severity:',
-    ...['high', 'medium', 'low'].map(s => `  ${SEVERITY_LABEL[s]}: ${(stats.by_severity || {})[s] || 0}`),
-    '',
-    `Busiest hour: ${stats.busiest_hour || '—'}`,
-  ];
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = digestReportFilename();
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+function loadHistory() {
+  const since = localIsoHoursAgo(historyState.hours);
+  fetchJson(`/incidents?since=${encodeURIComponent(since)}`)
+    .then(d => {
+      historyRecords = d.incidents || [];
+      renderHistory();
+    })
+    .catch(() => toast('Failed to load alert history'));
+}
+
+function filteredHistoryRecords() {
+  let records = historyRecords.slice().reverse();  // newest first
+  if (historyState.severities.size > 0) {
+    records = records.filter(r => historyState.severities.has(r.severity || 'low'));
+  }
+  if (historyState.zones.size > 0) {
+    records = records.filter(r => {
+      const zone = r.zone_name || 'Whole frame';
+      return historyState.zones.has(zone);
+    });
+  }
+  return records;
+}
+
+function renderHistory() {
+  historyListEl.innerHTML = '';
+  const records = filteredHistoryRecords();
+
+  if (historyCountEl) {
+    historyCountEl.textContent = `${records.length} incident${records.length === 1 ? '' : 's'}`;
+  }
+
+  if (records.length === 0) {
+    historyListEl.appendChild(
+      el('p', 'empty-state', 'No incidents match the current filters')
+    );
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  records.forEach(rec => frag.appendChild(buildHistoryItem(rec)));
+  historyListEl.appendChild(frag);
+}
+
+function buildHistoryItem(rec) {
+  const sev = rec.severity || 'low';
+  const item = el('div', 'history-item');
+
+  const img = document.createElement('img');
+  img.className = 'history-thumb';
+  img.src = rec.thumbnail || '';
+  img.alt = 'Incident frame';
+  img.loading = 'lazy';
+  img.addEventListener('click', () => openLightbox({
+    thumbnail: rec.thumbnail,
+    explanation: rec.explanation,
+    rule: rec.rule_text,
+    zone: rec.zone_name,
+    timestamp: rec.timestamp,
+    confidence: rec.confidence,
+  }));
+  if (!rec.thumbnail) img.style.visibility = 'hidden';
+  item.appendChild(img);
+
+  const body = el('div', 'history-body');
+
+  const top = el('div', 'history-top');
+  top.appendChild(el('span', 'history-datetime', formatDateTime(rec.timestamp)));
+  top.appendChild(el('span', `severity-badge sev-${sev}`, SEVERITY_LABEL[sev] || 'Low'));
+  body.appendChild(top);
+
+  body.appendChild(el('p', 'history-explanation', rec.explanation || ''));
+
+  const metaParts = [
+    rec.rule_text ? `Rule: ${rec.rule_text}` : '',
+    rec.zone_name ? `Zone: ${rec.zone_name}` : 'Zone: whole frame',
+    `Confidence: ${confidencePct(rec.confidence)}`,
+  ].filter(Boolean);
+  body.appendChild(el('p', 'history-meta', metaParts.join(' · ')));
+
+  item.appendChild(body);
+  return item;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ALERT IMAGE LIGHTBOX
+// ═════════════════════════════════════════════════════════════════════════════
+
+function alertMetaText(alert) {
+  const parts = [
+    alert.rule,
+    alert.zone,
+    formatTime(alert.timestamp),
+    confidencePct(alert.confidence),
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function openLightbox(alert) {
+  lightboxImgEl.src = alert.thumbnail;
+  lightboxExplEl.textContent = alert.explanation || '';
+  lightboxMetaEl.textContent = alertMetaText(alert);
+  lightboxBackdropEl.hidden = false;
+}
+
+function closeLightbox() {
+  lightboxBackdropEl.hidden = true;
+  lightboxImgEl.src = '';
+}
+
+lightboxBackdropEl.addEventListener('click', (e) => {
+  if (e.target === lightboxBackdropEl) closeLightbox();
+});
+document.getElementById('lightboxCloseBtn').addEventListener('click', closeLightbox);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !lightboxBackdropEl.hidden) closeLightbox();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1898,8 +2032,20 @@ downloadDigestBtn.addEventListener('click', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 renderRuleLibrary();
-renderDemoSources();
-loadZones();
-loadRules();
-loadDigestStats();
-startPolling();
+updateFeedTag();
+loadZones()
+  .then(() => loadRules())
+  .catch(() => {});
+loadDigest();
+startAlertPolling();
+
+// sync the feed mode with whatever the backend was last left with (e.g. the
+// DEMO_MODE env flag) so analysis and the UI agree from the first paint
+fetchJson('/demo_mode')
+  .then(d => {
+    if (d.demo_mode) {
+      setFeedMode('demo', { silent: true });
+      ensureDemoSource();
+    }
+  })
+  .catch(() => {});

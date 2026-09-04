@@ -7,212 +7,247 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+
+  <!-- ── sticky header: brand · nav · status ─────────────────────────────── -->
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
-        <span class="logo">OpenEye</span>
-        <span class="status-badge" id="statusBadge">
-          <span class="status-dot" id="statusDot"></span>
-          <span class="status-label" id="statusLabel">Idle</span>
-        </span>
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">OpenEye</span>
+      </div>
+      <nav class="main-nav" id="mainNav" aria-label="Main">
+        <a href="#" class="nav-link active" data-view="dashboard">Dashboard</a>
+        <a href="#" class="nav-link" data-view="history">History</a>
+      </nav>
+      <div class="status-badge" id="statusBadge" title="Monitoring status">
+        <span class="status-dot"></span>
+        <span class="status-label" id="statusLabel">Idle</span>
       </div>
     </div>
   </header>
 
-  <main class="layout">
-    <!-- ── left column: feed + controls + zone chips ── -->
-    <section class="feed-col">
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DASHBOARD VIEW
+       ══════════════════════════════════════════════════════════════════════ -->
+  <main class="view" id="dashboardView">
+    <div class="layout">
 
-      <!-- camera / demo feed -->
-      <div class="camera-frame" id="cameraFrame">
-        <img id="cameraFeed" src="/video_feed" alt="Live camera feed" />
-        <video id="demoVideo" muted autoplay playsinline hidden></video>
-        <img id="frozenFrame" class="frozen-frame" alt="" hidden />
-        <canvas id="zoneCanvas"></canvas>
-        <div class="camera-overlay" id="cameraOverlay">
-          <span>Camera unavailable</span>
-        </div>
+      <!-- ── left column: feed · controls · zones ────────────────────────── -->
+      <section class="feed-col">
 
-        <!-- zone-drawing toolbar: overlaid on the feed, visible only while drawing -->
-        <div class="draw-toolbar" id="drawToolbar" hidden>
-          <div class="shape-picker" id="shapePicker">
-            <label class="shape-option">
-              <input type="radio" name="drawMode" id="modeRect" value="rect" checked />
-              <span>Rectangle</span>
-            </label>
-            <label class="shape-option">
-              <input type="radio" name="drawMode" id="modePoly" value="poly" />
-              <span>Polygon</span>
-            </label>
-            <label class="shape-option">
-              <input type="radio" name="drawMode" id="modeCircle" value="circle" />
-              <span>Circle</span>
-            </label>
+        <!-- camera / demo feed -->
+        <div class="camera-frame" id="cameraFrame">
+          <img id="cameraFeed" src="/video_feed" alt="Live camera feed" />
+          <video id="demoVideo" muted autoplay playsinline hidden></video>
+          <img id="frozenFrame" class="frozen-frame" alt="" hidden />
+          <canvas id="zoneCanvas"></canvas>
+
+          <div class="camera-overlay" id="cameraOverlay">
+            <span class="camera-overlay-icon" aria-hidden="true">⃠</span>
+            <span>Camera unavailable — check the connection or switch to Demo</span>
           </div>
-          <span class="toolbar-hint" id="drawHint"></span>
-          <button type="button" class="btn-ghost btn-sm-w" id="cancelDrawBtn" onclick="cancelDraw()">Cancel</button>
-        </div>
-      </div>
 
-      <!-- control bar: mode toggle · actions -->
-      <div class="control-bar">
-        <div class="mode-toggle" id="feedModeToggle">
-          <button type="button" class="mode-btn active" data-mode="live">Live</button>
-          <button type="button" class="mode-btn" data-mode="demo">Demo</button>
-        </div>
+          <div class="feed-tag" id="feedTag">
+            <span class="feed-tag-dot" id="feedTagDot"></span>
+            <span id="feedTagText">LIVE</span>
+          </div>
 
-        <div class="control-actions">
-          <button type="button" class="btn-ghost" id="drawZoneBtn" onclick="toggleDrawMode()">
-            Draw zone
-          </button>
-          <button type="button" class="btn-primary" id="startBtn"
-                  data-tip="Add at least one enabled rule to start monitoring"
-                  onclick="startMonitoring()">
-            Start monitoring
-          </button>
-          <button type="button" class="btn-neutral" id="stopBtn" onclick="stopMonitoring()" hidden>
-            Stop
-          </button>
-        </div>
-      </div>
-
-      <!-- demo sources + progress (demo mode only) -->
-      <div class="demo-strip" id="demoStrip" hidden>
-        <div class="demo-sources" id="demoSources"></div>
-        <div class="demo-progress"><div class="demo-progress-fill" id="demoProgress"></div></div>
-        <span class="demo-status" id="demoStatusText"></span>
-        <input type="file" id="demoVideoInput" hidden
-               accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo" />
-      </div>
-
-      <!-- zone chips -->
-      <div class="zone-chips" id="zonesList"></div>
-
-      <!-- zone-name prompt, shown while naming a drawn zone -->
-      <div class="zone-name-prompt" id="zoneNamePrompt">
-        <div class="prompt-inner">
-          <p class="prompt-label">Name this zone</p>
-          <div class="prompt-row">
-            <input
-              id="zoneNameInput"
-              class="zone-name-input"
-              type="text"
-              placeholder="e.g. entrance, shelf A, doorway"
-              maxlength="40"
-              autocomplete="off"
-            />
-            <button type="button" class="btn-dark btn-sm-w" onclick="confirmZoneName()">Save</button>
-            <button type="button" class="btn-ghost btn-sm-w" onclick="hidePendingPrompt()">Cancel</button>
+          <!-- zone-drawing toolbar: overlaid on the feed, visible only while drawing -->
+          <div class="draw-toolbar" id="drawToolbar" hidden>
+            <div class="shape-picker" id="shapePicker" role="radiogroup" aria-label="Zone shape">
+              <label class="shape-option">
+                <input type="radio" name="drawMode" value="rect" checked />
+                <span>Rectangle</span>
+              </label>
+              <label class="shape-option">
+                <input type="radio" name="drawMode" value="poly" />
+                <span>Polygon</span>
+              </label>
+              <label class="shape-option">
+                <input type="radio" name="drawMode" value="circle" />
+                <span>Circle</span>
+              </label>
+            </div>
+            <span class="toolbar-hint" id="drawHint"></span>
+            <button type="button" class="btn btn-ghost btn-sm" id="cancelDrawBtn">Cancel</button>
           </div>
         </div>
-      </div>
 
-    </section>
-
-    <!-- ── right column: rules + alerts ── -->
-    <aside class="side-col">
-
-      <!-- rules card -->
-      <div class="card rules-card">
-        <h2 class="card-title">Rules</h2>
-
-        <div class="rule-composer">
-          <input
-            id="ruleInput"
-            type="text"
-            placeholder="Describe what to watch for (e.g. 'Is a person inside the danger zone?')"
-            maxlength="200"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <input
-            id="proximitySubjectInput"
-            class="proximity-input"
-            type="text"
-            title="Subject"
-            placeholder="a person"
-            maxlength="80"
-            autocomplete="off"
-            spellcheck="false"
-            hidden
-          />
-          <input
-            id="proximityHazardInput"
-            class="proximity-input"
-            type="text"
-            title="Near"
-            placeholder="a forklift"
-            maxlength="80"
-            autocomplete="off"
-            spellcheck="false"
-            hidden
-          />
-          <select id="ruleTypeSelect" title="Rule type">
-            <option value="standard" selected>Standard</option>
-            <option value="ppe_check">PPE check</option>
-            <option value="proximity">Proximity</option>
-          </select>
-          <select id="zoneSelect" title="Restrict rule to a zone">
-            <option value="">Whole frame</option>
-          </select>
-          <button type="button" class="btn-primary btn-sm-w" id="addRuleBtn">Add</button>
+        <!-- control bar: mode toggle · actions -->
+        <div class="control-bar">
+          <div class="mode-toggle" id="feedModeToggle" role="radiogroup" aria-label="Feed mode">
+            <button type="button" class="mode-btn active" data-mode="live">Live</button>
+            <button type="button" class="mode-btn" data-mode="demo">Demo</button>
+          </div>
+          <div class="control-actions">
+            <button type="button" class="btn btn-ghost" id="drawZoneBtn">Draw zone</button>
+            <button type="button" class="btn btn-ghost" id="uploadVideoBtn" hidden
+                    title="Use your own video clip as the demo feed">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M8 11V3.5"/><path d="M4.7 6.8 8 3.5l3.3 3.3"/>
+                <path d="M2.8 11.5v.7A1.8 1.8 0 0 0 4.6 14h6.8a1.8 1.8 0 0 0 1.8-1.8v-.7"/>
+              </svg>
+              Upload video
+            </button>
+            <button type="button" class="btn btn-ghost" id="useSampleBtn" hidden
+                    title="Switch to the bundled manufacturing video">
+              <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.5"/>
+                <path d="M6.9 6.4v3.2L9.6 8z" fill="currentColor" stroke="none"/>
+              </svg>
+              Use sample video
+            </button>
+            <button type="button" class="btn btn-ghost" id="sampleSceneBtn" hidden
+                    title="Return to the animated warehouse scene">
+              <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2.5 5.5h11v7h-11z"/><path d="m4.5 3.5 1.2 2M10.3 3.5l1.2 2"/>
+                <path d="M5.5 9.5l1.5 1.5 3-3"/>
+              </svg>
+              Animated scene
+            </button>
+            <button type="button" class="btn btn-primary" id="startBtn"
+                    data-tip="Add at least one enabled rule to start monitoring">
+              Start monitoring
+            </button>
+            <button type="button" class="btn btn-neutral" id="stopBtn" hidden>Stop</button>
+          </div>
         </div>
 
-        <div class="ppe-checklist" id="ppeChecklist" hidden>
-          <label class="ppe-option"><input type="checkbox" value="helmet" /> Helmet</label>
-          <label class="ppe-option"><input type="checkbox" value="high-visibility vest" /> High-visibility vest</label>
-          <label class="ppe-option"><input type="checkbox" value="safety gloves" /> Safety gloves</label>
-          <label class="ppe-option"><input type="checkbox" value="protective eyewear" /> Protective eyewear</label>
-          <label class="ppe-option"><input type="checkbox" value="face mask" /> Face mask</label>
-          <label class="ppe-option"><input type="checkbox" value="safety boots" /> Safety boots</label>
+        <!-- hidden input backing the demo Upload video button -->
+        <input type="file" id="videoFileInput"
+               accept=".mp4,.mov,.avi,video/mp4,video/quicktime,video/x-msvideo" hidden />
+
+        <!-- zones: chips with rule-count badges + inline naming prompt -->
+        <div class="card zones-card">
+          <div class="card-head">
+            <h2 class="card-title">Zones</h2>
+            <span class="card-sub" id="zonesSub">Draw a zone on the feed, then attach rules to it</span>
+          </div>
+          <div class="zone-chips" id="zonesList"></div>
+          <div class="zone-name-prompt" id="zoneNamePrompt">
+            <p class="prompt-label">Name this zone</p>
+            <div class="prompt-row">
+              <input id="zoneNameInput" type="text" placeholder="e.g. entrance, shelf A, doorway"
+                     maxlength="40" autocomplete="off" />
+              <button type="button" class="btn btn-primary btn-sm" id="saveZoneBtn">Save</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="cancelZoneBtn">Cancel</button>
+            </div>
+          </div>
         </div>
 
-        <div class="rule-library-wrap">
-          <button type="button" class="library-link" id="ruleLibraryLink">Browse rule library</button>
-          <div class="rule-library" id="ruleLibrary" hidden></div>
+      </section>
+
+      <!-- ── right column: rules · alerts · digest · AI digest ───────────── -->
+      <aside class="side-col">
+
+        <!-- rules -->
+        <div class="card rules-card" id="rulesCard">
+          <div class="card-head">
+            <h2 class="card-title">Rules</h2>
+            <span class="card-sub" id="rulesSub"></span>
+          </div>
+
+          <div class="rule-composer">
+            <input id="ruleInput" type="text"
+                   placeholder="Describe what to watch for (e.g. “Is a person inside the danger zone?”)"
+                   maxlength="200" autocomplete="off" spellcheck="false" />
+            <select id="zoneSelect" title="Restrict rule to a zone">
+              <option value="">Whole frame</option>
+            </select>
+            <button type="button" class="btn btn-dark btn-sm" id="addRuleBtn">Add</button>
+          </div>
+
+          <div class="rule-library-wrap">
+            <button type="button" class="library-link" id="ruleLibraryLink">Browse rule library</button>
+            <div class="rule-library" id="ruleLibrary" hidden></div>
+          </div>
+
+          <div class="rules-list" id="rulesList"></div>
         </div>
 
-        <div class="rules-list" id="rulesList"></div>
-      </div>
-
-      <!-- alerts card -->
-      <div class="card alerts-card">
-        <div class="alerts-header">
-          <h2 class="card-title">Alerts</h2>
-          <span class="alert-count" id="alertCount">0</span>
+        <!-- alerts -->
+        <div class="card alerts-card">
+          <div class="card-head">
+            <h2 class="card-title">Alerts</h2>
+            <span class="alert-count" id="alertCount">0</span>
+          </div>
+          <div class="alerts-list" id="alertsList"></div>
         </div>
-        <p class="alerts-context-label" id="alertsContextLabel">Live monitoring alerts</p>
-        <div class="alerts-list" id="alertsList">
-          <p class="empty-state" id="emptyState">No alerts yet</p>
+
+        <!-- shift digest -->
+        <div class="card digest-card" id="digestCard">
+          <button type="button" class="card-head digest-head-btn" id="digestHeaderBtn">
+            <h2 class="card-title">Shift Digest</h2>
+            <span class="card-sub" id="digestSubtitle">Loading…</span>
+            <span class="digest-chevron" id="digestChevron">▼</span>
+          </button>
+          <div class="digest-body" id="digestBody" hidden>
+            <div class="digest-stats" id="digestStats"></div>
+            <button type="button" class="btn btn-primary btn-full" id="generateDigestBtn">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-label">Generate AI digest</span>
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- shift digest card -->
-      <div class="card digest-card" id="digestCard">
-        <button type="button" class="digest-header" id="digestHeader">
-          <h2 class="card-title" id="digestTitle">Shift Digest</h2>
-          <span class="digest-summary-line" id="digestSummaryLine">Loading…</span>
-          <span class="digest-chevron" id="digestChevron">▾</span>
-        </button>
-
-        <div class="digest-body" id="digestBody" hidden>
-          <div class="digest-stats" id="digestStats"></div>
-
-          <button type="button" class="btn-rose btn-full" id="generateDigestBtn">Generate AI digest</button>
-
-          <div class="digest-result" id="digestResult" hidden></div>
-          <p class="digest-disclaimer" id="digestDisclaimer" hidden>
-            AI-generated summary based on logged incidents. Review before acting.
-          </p>
-
-          <button type="button" class="btn-ghost btn-full" id="downloadDigestBtn" hidden>Download report</button>
+        <!-- AI digest result — appears after generation -->
+        <div class="card ai-digest-card" id="aiDigestCard" hidden>
+          <div class="card-head">
+            <h2 class="card-title">AI Digest</h2>
+            <span class="card-sub" id="aiDigestSubtitle"></span>
+          </div>
+          <div class="digest-result" id="aiDigestResult"></div>
+          <p class="digest-disclaimer">AI-generated summary based on logged incidents. Review before acting.</p>
         </div>
-      </div>
 
-    </aside>
+      </aside>
+    </div>
   </main>
 
-  <!-- hidden canvas that renders demo scenes, streamed into #demoVideo -->
+  <!-- ══════════════════════════════════════════════════════════════════════
+       ALERT HISTORY VIEW
+       ══════════════════════════════════════════════════════════════════════ -->
+  <main class="view" id="historyView" hidden>
+    <div class="history-wrap">
+      <div class="card history-head-card">
+        <div class="history-title-row">
+          <h1 class="history-title">Alert History</h1>
+          <button type="button" class="btn btn-neutral" id="backToDashboard">← Back to dashboard</button>
+        </div>
+
+        <div class="history-filters">
+          <select id="historyRange" class="history-range" title="Time range">
+            <option value="1">Last 1 hour</option>
+            <option value="6">Last 6 hours</option>
+            <option value="12">Last 12 hours</option>
+            <option value="24" selected>Last 24 hours</option>
+          </select>
+
+          <div class="filter-group" role="group" aria-label="Filter by severity">
+            <span class="filter-group-label">Severity</span>
+            <div class="chip-row" id="severityChips">
+              <button type="button" class="filter-chip chip-sev-high" data-sev="high">High</button>
+              <button type="button" class="filter-chip chip-sev-medium" data-sev="medium">Medium</button>
+              <button type="button" class="filter-chip chip-sev-low" data-sev="low">Low</button>
+            </div>
+          </div>
+
+          <div class="filter-group" role="group" aria-label="Filter by zone">
+            <span class="filter-group-label">Zone</span>
+            <div class="chip-row" id="zoneChips"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="history-list" id="historyList"></div>
+    </div>
+  </main>
+
+  <!-- hidden canvas that renders the animated demo scene, streamed into #demoVideo -->
   <canvas id="demoSceneCanvas" width="1280" height="720" hidden></canvas>
 
   <!-- alert image lightbox -->
@@ -220,14 +255,15 @@
     <div class="lightbox-card">
       <img id="lightboxImg" class="lightbox-img" alt="Alert frame" />
       <p class="lightbox-explanation" id="lightboxExplanation"></p>
-      <div class="ppe-checklist-large" id="lightboxPpeChecklist" hidden></div>
       <p class="lightbox-meta" id="lightboxMeta"></p>
       <div class="lightbox-actions">
-        <button type="button" class="btn-rose" id="lightboxDownloadBtn">Download</button>
-        <button type="button" class="btn-ghost" id="lightboxCloseBtn">Close</button>
+        <button type="button" class="btn btn-ghost" id="lightboxCloseBtn">Close</button>
       </div>
     </div>
   </div>
+
+  <!-- toast notifications -->
+  <div class="toast" id="toast" hidden></div>
 
   <script src="/static/main.js"></script>
 </body>

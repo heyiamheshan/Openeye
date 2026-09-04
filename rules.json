@@ -1,12 +1,10 @@
 [
   {
-    "id": "58fc14dddc8a4661abd6b1e1c2e2e9ed",
-    "rule_text": "Proximity: mouse near hand",
-    "zone_name": "mouse",
+    "id": "c0dfc14ffbb24872868d11e613e5d920",
+    "rule_text": "humand hand visible in frame alert me",
+    "zone_name": "danger zone",
     "enabled": true,
     "zone_name_cleared": false,
-    "rule_type": "proximity",
-    "subject": "mouse",
-    "hazard": "hand"
+    "rule_type": "standard"
   }
 ]
