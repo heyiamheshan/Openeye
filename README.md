@@ -241,7 +241,6 @@ The entire application was developed using Qoder, Alibaba's agentic IDE. Qoder w
 
 - Multimodal audio event detection
 - Incident history page with filtering and search
-- Conversational rule refinement
 - MuleRun-hosted escalation
 - Edge inference for on-premise deployments
 
