@@ -244,4 +244,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## <img src="docs/icons/user.svg" width="18" height="18" align="absmiddle" alt=""> Author
 
-Built by [Heshan Pramuditha](https://github.com/heyiamheshan), University of Kelaniya, for the AI Buildathon 2026 — Smart Manufacturing track.
+Built by [Team Dream-Heshan](https://github.com/heyiamheshan), University of Kelaniya, for the AI Buildathon 2026 — Smart Manufacturing track.
