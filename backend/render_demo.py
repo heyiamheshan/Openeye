@@ -15,7 +15,7 @@ W, H = 1280, 720          # 16:9 output
 CW, CH = 480, 360         # logical canvas size (matches landing.js)
 FPS = 30
 DURATION = 9              # seconds
-OUTPUT = "static/openeye-demo.mp4"
+OUTPUT = "frontend/static/openeye-demo.mp4"
 
 # Colors (BGR)
 BG = np.array([0x11, 0x12, 0x13], dtype=np.uint8)

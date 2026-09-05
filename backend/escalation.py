@@ -23,9 +23,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import config
-import contacts_store
-import notifiers
+from . import config
+from . import contacts_store
+from . import notifiers
 
 log = logging.getLogger(__name__)
 

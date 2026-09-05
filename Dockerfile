@@ -1,4 +1,4 @@
-# OpenEye — AI Camera Monitoring System
+# Openeye Camera Monitoring System
 # ========================================
 # NOTE: Live camera mode requires a physical USB webcam.
 # In Docker, the webcam is NOT available unless explicitly passed through:

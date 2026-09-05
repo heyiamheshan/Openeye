@@ -6,15 +6,18 @@ import threading
 import uuid
 from pathlib import Path
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
 
-_STORE_PATH = Path("contacts.json")
+# Path to the JSON file that persists contacts at the project root.
+_STORE_PATH = config.BASE_DIR / "contacts.json"
+# Lock serialises reads/writes when multiple threads access the store.
 _lock = threading.Lock()
 
 
 def _load() -> list:
+    """Load contacts from disk, returning an empty list if the file is missing or corrupt."""
     if _STORE_PATH.exists():
         try:
             return json.loads(_STORE_PATH.read_text())
@@ -24,20 +27,23 @@ def _load() -> list:
 
 
 def _save(contacts: list):
+    """Persist the contacts list back to JSON."""
     _STORE_PATH.write_text(json.dumps(contacts, indent=2))
 
 
 def get_contacts() -> list:
+    """Return a thread-safe copy of all stored contacts."""
     with _lock:
         return list(_load())
 
 
 def add_contact(name: str, telegram_chat_id: str, zone_name: str | None = None) -> dict:
+    """Create a new contact and append it to the JSON store."""
     contact = {
-        "id": uuid.uuid4().hex[:12],
+        "id": uuid.uuid4().hex[:12],                      # Short unique identifier.
         "name": name.strip(),
-        "telegram_chat_id": telegram_chat_id.strip(),
-        "zone_name": zone_name.strip() if zone_name else None,
+        "telegram_chat_id": telegram_chat_id.strip(),    # Telegram destination chat.
+        "zone_name": zone_name.strip() if zone_name else None,  # Optional zone filter.
     }
     with _lock:
         contacts = _load()
@@ -47,6 +53,7 @@ def add_contact(name: str, telegram_chat_id: str, zone_name: str | None = None) 
 
 
 def delete_contact(contact_id: str) -> bool:
+    """Remove the contact with the given id.  Returns True if one was removed."""
     with _lock:
         contacts = _load()
         new = [c for c in contacts if c["id"] != contact_id]

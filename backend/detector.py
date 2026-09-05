@@ -1,3 +1,10 @@
+"""Core detection pipeline: frame capture, motion gate and VLM rule evaluation.
+
+DetectorThread continuously reads frames, skips low-motion frames, evaluates
+every enabled rule in parallel against Qwen3-VL, verifies zone geometry and
+escalates matched rules as alerts.
+"""
+
 import base64
 import json
 import re
@@ -16,12 +23,12 @@ import requests
 import urllib3
 from PIL import Image, ImageDraw
 
-import config
-import escalation
-import incident_log
-import rules_store
-import runtime_state
-import zones_store
+from . import config
+from . import escalation
+from . import incident_log
+from . import rules_store
+from . import runtime_state
+from . import zones_store
 
 
 def _motion_score(prev_bytes: bytes, curr_bytes: bytes) -> float:

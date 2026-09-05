@@ -1,3 +1,9 @@
+"""One-shot video analysis thread for uploaded demo clips.
+
+Runs the same detection pipeline used by the live feed against an MP4 file
+and escalates alerts without requiring a physical camera.
+"""
+
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -5,11 +11,11 @@ from pathlib import Path
 
 import cv2
 
-import config
-import escalation
-import incident_log
-import zones_store
-from detector import _draw_zone_overlay, _evaluate_rule, build_alert
+from . import config
+from . import escalation
+from . import incident_log
+from . import zones_store
+from .detector import _draw_zone_overlay, _evaluate_rule, build_alert
 
 TARGET_FRAMES = 30
 MAX_FRAMES = 40

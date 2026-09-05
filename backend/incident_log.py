@@ -1,11 +1,17 @@
+"""Persistent incident log and AI-powered shift digest generator.
+
+Records triggered alerts to logs/incidents.jsonl and summarises recent
+incidents into a plain-language safety report on demand.
+"""
+
 import json
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import config
+from . import config
 
-_LOG_DIR = Path("logs")
+_LOG_DIR = config.BASE_DIR / "logs"
 _LOG_FILE = _LOG_DIR / "incidents.jsonl"
 _lock = threading.Lock()
 
