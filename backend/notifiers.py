@@ -1,13 +1,16 @@
-"""Telegram notification sender for OpenEye alerts."""
+"""Telegram notification sender for Openeye alerts."""
 
 import logging
 from pathlib import Path
 
 import requests
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
+
+# Telegram Bot API endpoint template.  {token} is substituted at runtime.
+_TELEGRAM_API = "https://api.telegram.org/bot{token}/sendPhoto"
 
 _TG_API = "https://api.telegram.org/bot{token}/{method}"
 _warned_missing_token = False

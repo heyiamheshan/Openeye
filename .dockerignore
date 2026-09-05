@@ -1,0 +1,35 @@
+# Runtime data (mounted as volumes)
+alerts/
+uploads/
+logs/
+contacts.json
+rules.json
+zones.json
+
+# Credentials
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE / editor
+.qoder/
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Debug artifacts
+debug_*.jpg
+debug_*.png
+
+# Large demo video (keep only sample.mp4)
+demo/HD CCTV*.mp4
+
+# OS files
+.DS_Store
+Thumbs.db

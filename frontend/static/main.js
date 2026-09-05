@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// OpenEye — main.js
+// Openeye — main.js
 // Feed: live MJPEG, a procedurally animated demo scene rendered on a hidden
 // 1280×720 canvas and streamed into a <video> via captureStream(30), or an
 // uploaded clip that replaces the scene (backend analyzes it after upload).
@@ -619,18 +619,13 @@ function setFeedMode(mode, opts = {}) {
     if (!opts.silent) setBackendDemoMode(true);
   } else {
     // ── demo → live ───────────────────────────────────────────────────
-    // keep demo visible via display override so the fade-out can render
-    demoVideo.style.display = 'block !important';
-    demoVideo.style.opacity = '0';
+    // Hide demo video immediately to prevent sample frame from persisting
     stopDemoScene();
-    setTimeout(() => {
-      demoVideo.pause();
-      demoVideo.removeAttribute('src');
-      demoVideo.srcObject = null;
-      demoVideo.style.display = '';
-      demoVideo.style.opacity = '';
-      demoVideo.hidden = true;
-    }, 320);
+    demoVideo.pause();
+    demoVideo.removeAttribute('src');
+    demoVideo.srcObject = null;
+    demoVideo.hidden = true;
+    demoVideo.style.cssText = '';   // clear any leftover inline overrides
     // restore the MJPEG source and fade the live image in
     if (feedImg.dataset.liveSrc) {
       feedImg.src = feedImg.dataset.liveSrc;

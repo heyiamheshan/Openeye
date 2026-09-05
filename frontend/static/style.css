@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   OpenEye — style.css
+   Openeye — style.css
    Visual language: light stone background, white cards with 1px soft borders
    and 12px radius, crimson #E11D48 for primary actions / active states /
    alerts / zone overlays. Operational-dashboard aesthetic, system sans-serif
@@ -46,7 +46,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -55,7 +55,7 @@ body {
 
 button {
   font-family: var(--font);
-  font-size: 14px;
+  font-size: 15px;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease,
               opacity 120ms ease, box-shadow 120ms ease;
@@ -88,10 +88,10 @@ img { display: block; }
 }
 
 .header-inner {
-  max-width: 1400px;
+  max-width: 1500px;
   margin: 0 auto;
   padding: 0 28px;
-  height: 56px;
+  height: 58px;
   display: flex;
   align-items: center;
   gap: 28px;
@@ -143,7 +143,8 @@ img { display: block; }
   flex: 1;
 }
 
-.nav-link {
+.nav-link,
+.nav-home {
   padding: 6px 14px;
   font-size: 14px;
   font-weight: 500;
@@ -153,7 +154,8 @@ img { display: block; }
   transition: color 120ms ease, background 120ms ease;
 }
 
-.nav-link:hover { color: var(--text); background: var(--surface-2); }
+.nav-link:hover,
+.nav-home:hover { color: var(--text); background: var(--surface-2); }
 
 .nav-link.active {
   color: var(--accent);
@@ -204,9 +206,9 @@ img { display: block; }
 
 /* ── layout ────────────────────────────────────────────────────────────────── */
 .layout {
-  max-width: 1400px;
+  max-width: 1500px;
   margin: 0 auto;
-  padding: 24px 28px 40px;
+  padding: 20px 28px 36px;
   display: grid;
   grid-template-columns: 58fr 42fr;
   gap: 20px;
@@ -216,14 +218,14 @@ img { display: block; }
 .feed-col {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
 }
 
 .side-col {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -239,7 +241,7 @@ img { display: block; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 18px;
+  padding: 20px;
   box-shadow: var(--shadow-card);
 }
 
@@ -252,7 +254,7 @@ img { display: block; }
 }
 
 .card-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -435,14 +437,14 @@ img { display: block; }
 .control-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  min-height: 38px;
+  min-height: 42px;
 }
 
 .control-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   margin-left: auto;
   flex-wrap: wrap;
 }
@@ -452,7 +454,7 @@ img { display: block; }
 .shape-picker {
   display: inline-flex;
   gap: 2px;
-  padding: 3px;
+  padding: 4px;
   background: var(--surface-2);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
@@ -460,8 +462,8 @@ img { display: block; }
 
 .mode-btn,
 .shape-option {
-  padding: 5px 14px;
-  font-size: 13px;
+  padding: 6px 16px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-2);
   background: transparent;
@@ -500,14 +502,14 @@ img { display: block; }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 8px 18px;
-  font-size: 14px;
+  padding: 9px 20px;
+  font-size: 15px;
   font-weight: 500;
   border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 
-.btn-sm { padding: 6px 14px; font-size: 13px; }
+.btn-sm { padding: 7px 16px; font-size: 14px; }
 
 .btn-full { width: 100%; }
 
@@ -1599,12 +1601,13 @@ button.digest-stat-row:hover .digest-count { color: var(--accent-dark); }
 /* mobile refinements below 640px */
 @media (max-width: 640px) {
   .header-inner {
-    padding: 0 14px;
+    padding: 0 16px;
     gap: 14px;
     height: 52px;
   }
 
-  .nav-link { padding: 5px 10px; font-size: 13px; }
+  .nav-link,
+  .nav-home { padding: 5px 10px; font-size: 13px; }
 
   .status-badge { padding: 4px 10px; }
   .status-label { font-size: 12px; }

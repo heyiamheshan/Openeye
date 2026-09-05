@@ -1,13 +1,24 @@
+"""JSON-backed storage for natural-language monitoring rules.
+
+Rules are persisted to rules.json at the project root and kept in memory
+behind a thread-safe cache for fast reads by the detector.
+"""
+
 import json
 import threading
 import uuid
 from pathlib import Path
 
-_FILE = Path("rules.json")
+from . import config
+
+# Path to the JSON file that persists rules at the project root.
+_FILE = config.BASE_DIR / "rules.json"
+# Lock serialises reads/writes when multiple threads access the store.
 _lock = threading.Lock()
 
 
 def _load() -> list:
+    """Load rules from disk, returning an empty list if the file is missing or corrupt."""
     if _FILE.exists():
         try:
             return json.loads(_FILE.read_text())
@@ -17,16 +28,18 @@ def _load() -> list:
 
 
 def _save(rules: list):
+    """Persist the rules list back to JSON."""
     _FILE.write_text(json.dumps(rules, indent=2))
 
 
 def get_rules() -> list:
-    """[{id, rule_text, zone_name, enabled, zone_name_cleared}, ...]"""
+    """Return every saved rule.  Shape: [{id, rule_text, zone_name, enabled, zone_name_cleared}, ...]."""
     with _lock:
         return _load()
 
 
 def get_enabled_rules() -> list:
+    """Return only rules that are currently enabled for detection."""
     with _lock:
         return [r for r in _load() if r.get("enabled", True)]
 
@@ -39,18 +52,21 @@ def add_rule(
     subject: str | None = None,
     hazard: str | None = None,
 ) -> dict:
+    """Create a new rule, append it to the store and return the created record."""
     with _lock:
         rules = _load()
         rule = {
-            "id": uuid.uuid4().hex,
+            "id": uuid.uuid4().hex,          # Unique identifier used by the UI and detector.
             "rule_text": rule_text,
             "zone_name": zone_name,
             "enabled": True,
             "zone_name_cleared": False,
             "rule_type": rule_type,
         }
+        # PPE rules carry the list of required equipment.
         if rule_type == "ppe_check":
             rule["required_ppe"] = required_ppe or []
+        # Proximity rules describe what should stay away from a hazard.
         if rule_type == "proximity":
             rule["subject"] = subject or ""
             rule["hazard"] = hazard or ""
@@ -60,6 +76,7 @@ def add_rule(
 
 
 def set_zone(rule_id: str, zone_name: str | None) -> dict | None:
+    """Assign (or clear) the zone for a rule.  Returns the updated rule or None."""
     with _lock:
         rules = _load()
         for r in rules:
@@ -72,6 +89,7 @@ def set_zone(rule_id: str, zone_name: str | None) -> dict | None:
 
 
 def set_enabled(rule_id: str, enabled: bool) -> bool:
+    """Toggle whether a rule is active in the detector.  Returns True if found."""
     with _lock:
         rules = _load()
         for r in rules:
@@ -95,6 +113,7 @@ def update_rule_text(rule_id: str, new_text: str) -> dict | None:
 
 
 def delete_rule(rule_id: str) -> bool:
+    """Remove a rule by id.  Returns True if a rule was removed."""
     with _lock:
         rules = _load()
         new_rules = [r for r in rules if r["id"] != rule_id]

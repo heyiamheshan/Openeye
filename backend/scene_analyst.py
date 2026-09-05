@@ -10,7 +10,7 @@ import requests
 import urllib3
 from PIL import Image
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
 
