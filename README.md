@@ -2,7 +2,7 @@
   <img src="docs/logo.svg" alt="OpenEye" width="80">
   <h1>OpenEye</h1>
   <h3>Your Vision. Your Rules.</h3>
-  <p>AI-powered camera monitoring that watches for exactly what you describe — no datasets, no training, no engineers.</p>
+  <p>AI-powered camera monitoring that watches for exactly what you describe . no datasets, no training, no engineers.</p>
   <img src="docs/app-preview.jpg" alt="OpenEye application preview" width="720">
 </div>
 
