@@ -241,7 +241,6 @@ The entire application was developed using Qoder, Alibaba's agentic IDE. Qoder w
 
 - Multimodal audio event detection
 - Incident history page with filtering and search
-- Conversational rule refinement
 - MuleRun-hosted escalation
 - Edge inference for on-premise deployments
 
@@ -251,4 +250,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## <img src="docs/icons/user.svg" width="18" height="18" align="absmiddle" alt=""> Author
 
-Built by [YOUR NAME], University of Kelaniya, for the AI Buildathon 2026 — Smart Manufacturing track.
+Built by Heshan Dharmasena, University of Kelaniya, for the AI Buildathon 2026 — Smart Manufacturing track.
