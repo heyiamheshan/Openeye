@@ -222,7 +222,7 @@ function switchView(view) {
   const isHistory = view === 'history';
   dashboardViewEl.hidden = isHistory;
   historyViewEl.hidden = !isHistory;
-  document.querySelectorAll('#mainNav .nav-link').forEach(link => {
+  document.querySelectorAll('#mainNav .nav-link[data-view]').forEach(link => {
     link.classList.toggle('active', link.dataset.view === view);
   });
   if (isHistory) {
@@ -232,7 +232,7 @@ function switchView(view) {
   window.scrollTo({ top: 0 });
 }
 
-document.querySelectorAll('#mainNav .nav-link').forEach(link => {
+document.querySelectorAll('#mainNav .nav-link[data-view]').forEach(link => {
   link.addEventListener('click', (e) => {
     e.preventDefault();
     switchView(link.dataset.view);
@@ -738,9 +738,9 @@ function applyCustomDemoVideo(url, isBlob) {
 function loadSampleVideo() {
   stopDemoScene();
   demoVideo.srcObject = null;
-  demoVideo.src = 'demo/sample.mp4';
+  demoVideo.src = '/demo/sample.mp4';
   demoVideo.loop = true;
-  customDemoUrl = 'demo/sample.mp4';
+  customDemoUrl = '/demo/sample.mp4';
   customDemoIsBlob = false;
   demoVideo.play().catch(() => {});
   // point the backend's analysis source at the bundled sample clip

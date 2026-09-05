@@ -1,5 +1,31 @@
+# Credentials / local configuration
 .env
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+
+# Runtime state (fresh clone starts with an empty app)
 alerts/
 uploads/
+logs/
+rules.json
+zones.json
+contacts.json
+
+# Debug / test artifacts
+debug_*.jpg
+debug_*.png
+camera_test_*.jpg
+
+# Large local demo footage (only demo/sample.mp4 belongs in the repo)
+demo/*.mp4
+!demo/sample.mp4
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.qoder/

@@ -40,36 +40,28 @@ Key capabilities:
 
 ## <img src="docs/icons/image.svg" width="18" height="18" align="absmiddle" alt=""> Screenshots
 
-![Dashboard](docs/screenshot-dashboard.png)
-*Live dashboard with feed, zones, and active rules.*
-
-![Alert with evidence](docs/screenshot-alert.png)
-*Alert card with evidence frame, explanation, and confidence score.*
-
-![AI Digest](docs/screenshot-digest.png)
-*AI-generated shift digest summarising incidents and patterns.*
-
-<!-- NOTE: Add the three screenshot files above to the docs/ folder before publishing the repository. -->
+![OpenEye application preview](docs/app-preview.jpg)
+*Dashboard with live feed, zone drawing, and natural-language rules.*
 
 ## <img src="docs/icons/play.svg" width="18" height="18" align="absmiddle" alt=""> Quick Start with Docker (recommended)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/openeye.git
-cd openeye
+git clone https://github.com/heyiamheshan/Openeye-AI-Buildthon.git
+cd Openeye-AI-Buildthon
 cp .env.example .env
 # Edit .env and add your Alibaba Cloud Model Studio API key
-docker compose up
+docker compose up --build
 ```
 
 Then open http://localhost:5001.
 
-Live camera mode needs a physical webcam passed through with `--device`. Judges without a webcam should use Demo mode, which works fully with the bundled sample video.
+The container boots even without an API key — the UI, zone drawing, and demo video all work; AI analysis needs the key. Live camera mode needs a physical webcam passed through with `--device`. Without a webcam, use **Demo mode** (default) — it works fully with the bundled sample video: add a rule, switch the feed to Demo, and click **Start Monitoring**.
 
 ## <img src="docs/icons/play.svg" width="18" height="18" align="absmiddle" alt=""> Quick Start (Local, without Docker)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/openeye.git
-cd openeye
+git clone https://github.com/heyiamheshan/Openeye-AI-Buildthon.git
+cd Openeye-AI-Buildthon
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your credentials
@@ -109,9 +101,9 @@ The free tier gives 1,000,000 tokens on Qwen3-VL models, which is enough for dev
 |----------|---------|
 | `DASHSCOPE_API_KEY` | Alibaba Cloud Model Studio API key |
 | `API_BASE_URL` | DashScope-compatible endpoint URL |
-| `MODEL` | Vision-language model identifier (default: `qwen3-vl-235b-a22b-instruct`) |
+| `VL_MODEL` | Vision-language model identifier (default: `qwen3-vl-235b-a22b-instruct`) |
+| `TEXT_MODEL` | Text model for rule refinement and digests (default: `qwen-plus`) |
 | `CAMERA_INDEX` | USB webcam index, e.g. `0` |
-| `RTSP_URL` | Optional RTSP stream URL (overrides `CAMERA_INDEX`) |
 | `POLL_INTERVAL` | Seconds between frame analyses while monitoring |
 | `MOTION_THRESHOLD` | Minimum motion score to trigger a VLM call |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
@@ -223,7 +215,8 @@ openeye/
 │   │   └── openeye-demo.mp4  # Demo video
 │   └── templates/            # Jinja2 HTML templates
 │       ├── index.html        # Dashboard UI
-│       └── landing.html      # Marketing landing page
+│       ├── landing.html      # Marketing landing page
+│       └── camera-guide.html # Camera connection guide
 ├── app.py                    # Root entry point (imports backend.app)
 ├── requirements.txt          # Python dependencies
 ├── Dockerfile                # Container image
@@ -233,6 +226,8 @@ openeye/
 └── docs/                     # README assets and screenshots
 ```
 
+> Runtime state (`rules.json`, `zones.json`, `contacts.json`, `alerts/`, `logs/`, `uploads/`) is generated on first use — a fresh clone starts completely empty.
+
 ## <img src="docs/icons/cpu.svg" width="18" height="18" align="absmiddle" alt=""> Built With Qoder
 
 The entire application was developed using Qoder, Alibaba's agentic IDE. Qoder was used to scaffold the dashboard, refactor the detection pipeline into modular components, run code reviews, and generate deployment artifacts.
@@ -240,7 +235,6 @@ The entire application was developed using Qoder, Alibaba's agentic IDE. Qoder w
 ## <img src="docs/icons/map.svg" width="18" height="18" align="absmiddle" alt=""> Roadmap
 
 - Multimodal audio event detection
-- Incident history page with filtering and search
 - MuleRun-hosted escalation
 - Edge inference for on-premise deployments
 
@@ -250,4 +244,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## <img src="docs/icons/user.svg" width="18" height="18" align="absmiddle" alt=""> Author
 
-Built by [YOUR NAME], University of Kelaniya, for the AI Buildathon 2026 — Smart Manufacturing track.
+Built by [Heshan Pramuditha](https://github.com/heyiamheshan), University of Kelaniya, for the AI Buildathon 2026 — Smart Manufacturing track.

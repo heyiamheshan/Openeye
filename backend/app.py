@@ -28,7 +28,7 @@ Path(config.BASE_DIR / "logs").mkdir(exist_ok=True)
 log = logging.getLogger(__name__)
 
 ALLOWED_VIDEO_EXTS = {"mp4", "mov", "avi"}
-DEMO_SAMPLE_PATH = "demo/sample.mp4"
+DEMO_SAMPLE_PATH = str(config.BASE_DIR / "demo" / "sample.mp4")
 
 _detector_thread: DetectorThread | None = None
 _detector_lock = threading.Lock()
@@ -138,6 +138,12 @@ def dashboard():
     return render_template("index.html")
 
 
+@app.route("/camera-guide")
+def camera_guide():
+    """Serve the camera connection guide."""
+    return render_template("camera-guide.html")
+
+
 @app.route("/video_feed")
 def video_feed():
     """MJPEG stream endpoint used by the dashboard <img> tag."""
@@ -197,7 +203,7 @@ def uploaded_video(filename):
 @app.route("/demo/<path:filename>")
 def demo_asset(filename):
     """Serves the bundled sample clip so the demo <video> element can play it."""
-    return send_from_directory("demo", filename)
+    return send_from_directory(str(config.BASE_DIR / "demo"), filename)
 
 
 @app.route("/demo_run/load_sample", methods=["POST"])

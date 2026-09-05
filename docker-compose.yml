@@ -8,7 +8,10 @@ services:
       - log-data:/app/logs
       - upload-data:/app/uploads
     env_file:
-      - .env
+      # Optional: judges can copy .env.example to .env and add their
+      # DashScope API key. The container still boots without the file.
+      - path: .env
+        required: false
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

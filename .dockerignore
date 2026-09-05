@@ -26,9 +26,11 @@ __pycache__/
 # Debug artifacts
 debug_*.jpg
 debug_*.png
+camera_test_*.jpg
 
-# Large demo video (keep only sample.mp4)
-demo/HD CCTV*.mp4
+# Demo footage (keep only the bundled manufacturing sample)
+demo/*.mp4
+!demo/sample.mp4
 
 # OS files
 .DS_Store
